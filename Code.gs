@@ -1,7 +1,8 @@
 const MESSAGE_SHEET_NAME = "messages";
 const GROUP_SHEET_NAME = "groups";
 const DELETED_GROUP_SHEET_NAME = "deletedGroups";
-const SHEET_HEADERS = ["timestamp", "senderName", "userId", "text", "sourceType", "groupId"];
+const SHEET_HEADERS = ["time", "sender", "userId", "groupId", "groupName", "text", "source"];
+const LEGACY_SHEET_HEADERS = ["timestamp", "senderName", "userId", "text", "sourceType", "groupId"];
 const GROUP_HEADERS = ["groupId", "groupName", "lastSeenAt"];
 const DELETED_GROUP_HEADERS = ["groupId", "deletedAt"];
 
@@ -25,10 +26,11 @@ function doPost(e) {
 function doGet(e) {
   const callback = sanitizeCallback(e.parameter.callback || "callback");
   const action = e.parameter.action || "messages";
-  const groupId = String(e.parameter.groupId || "");
+  const defaultGroupId = PropertiesService.getScriptProperties().getProperty("GROUP_ID") || "";
+  const groupId = String(e.parameter.groupId || defaultGroupId);
   const payload = action === "groups"
     ? { groups: getGroups() }
-    : { messages: getLatestMessages(Math.min(Number(e.parameter.limit || 50), 50), groupId) };
+    : { messages: getMessages(Math.min(Number(e.parameter.limit || 50), 50), groupId) };
   const body = callback + "(" + JSON.stringify(payload) + ");";
 
   return ContentService
@@ -49,16 +51,18 @@ function handleLineWebhook(events) {
     const userId = event.source && event.source.userId ? event.source.userId : "";
     const sourceType = event.source && event.source.type ? event.source.type : "";
     const groupId = event.source && event.source.groupId ? event.source.groupId : "";
+    const groupName = groupId ? getGroupName(groupId) : "";
     const senderName = getDisplayName(event.source, userId);
     const timestamp = new Date(event.timestamp || Date.now()).toISOString();
 
     appendMessage({
-      timestamp: timestamp,
-      senderName: senderName,
+      time: timestamp,
+      sender: senderName,
       userId: userId,
+      groupId: groupId,
+      groupName: groupName,
       text: event.message.text,
-      sourceType: sourceType,
-      groupId: groupId
+      source: sourceType
     });
   });
 }
@@ -67,15 +71,17 @@ function handlePagesMessage(data) {
   const props = PropertiesService.getScriptProperties();
   const token = props.getProperty("CHANNEL_ACCESS_TOKEN");
   const groupId = String(data.groupId || props.getProperty("GROUP_ID") || "");
+  const groupName = getStoredGroupName(groupId);
   const text = String(data.text || data.body || "");
 
   appendMessage({
-    timestamp: new Date().toISOString(),
-    senderName: String(data.senderName || data.sender || "やんさん"),
+    time: new Date().toISOString(),
+    sender: String(data.senderName || data.sender || "やんさん"),
     userId: "github-pages",
+    groupId: groupId,
+    groupName: groupName,
     text: text,
-    sourceType: "githubPages",
-    groupId: groupId
+    source: "githubPages"
   });
 
   UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
@@ -95,16 +101,17 @@ function handlePagesMessage(data) {
 function appendMessage(message) {
   const sheet = getSheet();
   sheet.appendRow([
-    message.timestamp,
-    message.senderName,
+    message.time,
+    message.sender,
     message.userId,
+    message.groupId,
+    message.groupName,
     message.text,
-    message.sourceType,
-    message.groupId
+    message.source
   ]);
 }
 
-function getLatestMessages(limit, groupId) {
+function getMessages(limit, groupId) {
   const sheet = getSheet();
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) {
@@ -116,16 +123,17 @@ function getLatestMessages(limit, groupId) {
 
   for (let i = values.length - 1; i >= 0 && matched.length < limit; i -= 1) {
     const row = values[i];
-    if (String(row[5] || "") !== groupId) {
+    if (String(row[3] || "") !== groupId) {
       continue;
     }
     matched.unshift({
-      timestamp: row[0],
-      senderName: row[1],
+      time: row[0],
+      sender: row[1],
       userId: row[2],
-      text: row[3],
-      sourceType: row[4],
-      groupId: row[5]
+      groupId: row[3],
+      groupName: row[4],
+      text: row[5],
+      source: row[6]
     });
   }
 
@@ -176,10 +184,53 @@ function getSheet() {
   if (sheet.getLastRow() === 0) {
     sheet.appendRow(SHEET_HEADERS);
   } else {
-    ensureHeaders(sheet, SHEET_HEADERS);
+    migrateMessageSheet(sheet);
   }
 
   return sheet;
+}
+
+function migrateMessageSheet(sheet) {
+  const lastRow = sheet.getLastRow();
+  const current = sheet.getRange(1, 1, 1, Math.max(SHEET_HEADERS.length, LEGACY_SHEET_HEADERS.length)).getValues()[0];
+  const isNew = SHEET_HEADERS.every(function (header, index) {
+    return current[index] === header;
+  });
+
+  if (isNew) {
+    return;
+  }
+
+  const isLegacy = LEGACY_SHEET_HEADERS.every(function (header, index) {
+    return current[index] === header;
+  });
+
+  if (!isLegacy) {
+    ensureHeaders(sheet, SHEET_HEADERS);
+    return;
+  }
+
+  const rowCount = lastRow - 1;
+  const legacyValues = rowCount > 0
+    ? sheet.getRange(2, 1, rowCount, LEGACY_SHEET_HEADERS.length).getValues()
+    : [];
+  const migrated = legacyValues.map(function (row) {
+    const groupId = row[5] || "";
+    return [
+      row[0],
+      row[1],
+      row[2],
+      groupId,
+      getStoredGroupName(groupId),
+      row[3],
+      row[4]
+    ];
+  });
+
+  sheet.getRange(1, 1, 1, SHEET_HEADERS.length).setValues([SHEET_HEADERS]);
+  if (migrated.length) {
+    sheet.getRange(2, 1, migrated.length, SHEET_HEADERS.length).setValues(migrated);
+  }
 }
 
 function getGroupSheet() {
@@ -256,6 +307,27 @@ function getGroups() {
     .sort(function (a, b) {
       return new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime();
     });
+}
+
+function getStoredGroupName(groupId) {
+  if (!groupId) {
+    return "";
+  }
+
+  const sheet = getGroupSheet();
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    return groupId;
+  }
+
+  const values = sheet.getRange(2, 1, lastRow - 1, GROUP_HEADERS.length).getValues();
+  for (let i = 0; i < values.length; i += 1) {
+    if (values[i][0] === groupId) {
+      return values[i][1] || groupId;
+    }
+  }
+
+  return groupId;
 }
 
 function deleteGroup(groupId) {

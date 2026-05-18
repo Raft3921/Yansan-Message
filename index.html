@@ -396,11 +396,8 @@
         }
 
         var payload = {
-          sender: SENDER_NAME,
-          senderName: SENDER_NAME,
           text: body,
-          body: body,
-          sourceType: "githubPages",
+          sender: SENDER_NAME,
           groupId: selectedGroupId
         };
 
@@ -552,10 +549,10 @@
         }
 
         rows.forEach(function (row) {
-          var senderName = getField(row, ["senderName", "sender", "name", "userName"]) || "不明";
+          var senderName = getField(row, ["sender", "senderName", "name", "userName"]) || "不明";
           var text = getField(row, ["text", "body", "message"]) || "";
-          var timestamp = getField(row, ["timestamp", "datetime", "date"]);
-          var isMine = senderName === SENDER_NAME || getField(row, ["sourceType"]) === "githubPages";
+          var timestamp = getField(row, ["time", "timestamp", "datetime", "date"]);
+          var isMine = senderName === SENDER_NAME || getField(row, ["source", "sourceType"]) === "githubPages";
 
           var item = document.createElement("article");
           item.className = "message " + (isMine ? "mine" : "other");

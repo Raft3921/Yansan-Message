@@ -8,16 +8,18 @@
   <style>
     :root {
       color-scheme: light;
-      --bg: #f6f4ef;
-      --panel: #ffffff;
-      --ink: #1d1f22;
-      --muted: #676b70;
-      --line: #d8d2c7;
-      --primary: #0b7a4b;
-      --primary-dark: #075f3a;
-      --accent: #be4b2f;
-      --focus: #1d6fd8;
-      --shadow: 0 10px 30px rgba(43, 38, 31, 0.1);
+      --bg: #8bb4d9;
+      --header: #6f9cc7;
+      --chat: #8bb4d9;
+      --mine: #8de055;
+      --other: #ffffff;
+      --ink: #17202a;
+      --muted: #5c6670;
+      --line: rgba(34, 48, 62, 0.18);
+      --panel: #f7f8fa;
+      --button: #0b7a4b;
+      --button-dark: #075f3a;
+      --danger: #a42d18;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
@@ -25,342 +27,243 @@
       box-sizing: border-box;
     }
 
+    html,
+    body {
+      height: 100%;
+    }
+
     body {
       margin: 0;
-      background:
-        linear-gradient(180deg, rgba(246, 244, 239, 0.95), rgba(246, 244, 239, 1)),
-        radial-gradient(circle at top left, rgba(11, 122, 75, 0.14), transparent 36rem);
+      background: var(--chat);
       color: var(--ink);
-      line-height: 1.7;
+      line-height: 1.5;
     }
 
     button,
-    textarea,
-    input {
+    textarea {
       font: inherit;
     }
 
-    button {
-      min-height: 56px;
-      border: 0;
-      border-radius: 8px;
-      cursor: pointer;
-      font-weight: 700;
-      touch-action: manipulation;
-    }
-
-    button:disabled {
-      cursor: not-allowed;
-      opacity: 0.58;
-    }
-
     button:focus-visible,
-    textarea:focus-visible,
-    input:focus-visible {
-      outline: 4px solid rgba(29, 111, 216, 0.28);
+    textarea:focus-visible {
+      outline: 4px solid rgba(255, 255, 255, 0.7);
       outline-offset: 2px;
     }
 
     .app {
-      width: min(920px, 100%);
-      margin: 0 auto;
-      padding: 18px 14px 44px;
+      min-height: 100%;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      background: var(--chat);
     }
 
-    header {
-      padding: 18px 2px 16px;
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+      min-height: 64px;
+      padding: 10px 14px;
+      background: var(--header);
+      color: #fff;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
     }
 
     h1 {
       margin: 0;
-      font-size: clamp(28px, 7vw, 42px);
+      font-size: 22px;
       line-height: 1.2;
       letter-spacing: 0;
     }
 
-    .subtitle {
-      margin: 8px 0 0;
-      color: var(--muted);
-      font-size: 16px;
-    }
-
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      box-shadow: var(--shadow);
-      padding: 18px;
-      margin: 14px 0;
-    }
-
-    .settings {
-      display: grid;
-      gap: 12px;
-      background: #fffaf0;
-      border-color: #dec99d;
-      box-shadow: none;
-    }
-
-    .settings summary {
-      min-height: 48px;
-      display: flex;
-      align-items: center;
-      font-weight: 800;
-      cursor: pointer;
-    }
-
-    .field {
-      display: grid;
-      gap: 8px;
-      margin: 0 0 16px;
-    }
-
-    label,
-    .label {
-      font-size: 17px;
-      font-weight: 800;
-    }
-
-    .sender {
-      display: inline-flex;
-      align-items: center;
-      min-height: 48px;
-      width: fit-content;
-      padding: 0 16px;
-      background: #e7f3ed;
-      color: #06462b;
-      border: 1px solid #b9ddca;
-      border-radius: 8px;
-      font-size: 19px;
-      font-weight: 800;
-    }
-
-    input[type="url"],
-    textarea {
-      width: 100%;
-      border: 2px solid #b9b3aa;
-      border-radius: 8px;
-      background: #fff;
-      color: var(--ink);
-    }
-
-    input[type="url"] {
-      min-height: 52px;
-      padding: 10px 12px;
-      font-size: 16px;
-    }
-
-    textarea {
-      min-height: 170px;
-      resize: vertical;
-      padding: 14px;
-      font-size: 20px;
-      line-height: 1.65;
-    }
-
-    .actions {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 10px;
-    }
-
-    .primary {
-      background: var(--primary);
-      color: #fff;
-      font-size: 20px;
-      padding: 0 18px;
-    }
-
-    .primary:hover {
-      background: var(--primary-dark);
-    }
-
-    .secondary {
-      background: #ece7de;
-      color: #222;
-      border: 1px solid #cbc2b4;
-      padding: 0 16px;
-    }
-
-    .ghost {
-      background: transparent;
-      color: var(--primary-dark);
-      border: 2px solid #9fcdb8;
-      padding: 0 16px;
-    }
-
-    .danger {
-      color: var(--accent);
-      border-color: #e7b1a3;
-    }
-
-    .toolbar {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      align-items: center;
-      gap: 12px;
-      margin: 20px 0 10px;
-    }
-
-    h2 {
-      margin: 0;
-      font-size: 24px;
-      line-height: 1.3;
-      letter-spacing: 0;
-    }
-
     .status {
-      min-height: 30px;
-      margin: 12px 0 0;
-      color: var(--muted);
+      min-height: 22px;
+      margin: 0;
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 13px;
       font-weight: 700;
+      text-align: right;
     }
 
     .status.error {
-      color: #a42d18;
+      color: #ffe1d9;
+    }
+
+    .chat {
+      min-height: 0;
+      overflow-y: auto;
+      padding: 14px 12px 18px;
+      scroll-behavior: smooth;
     }
 
     .messages {
+      width: min(760px, 100%);
+      margin: 0 auto;
       display: grid;
-      gap: 12px;
+      gap: 10px;
+    }
+
+    .empty {
+      width: min(560px, 100%);
+      margin: 28px auto;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.58);
+      color: #273746;
+      text-align: center;
+      font-weight: 800;
     }
 
     .message {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 16px;
-      box-shadow: 0 5px 18px rgba(43, 38, 31, 0.07);
+      display: grid;
+      max-width: 82%;
+      gap: 4px;
+    }
+
+    .message.other {
+      justify-self: start;
+    }
+
+    .message.mine {
+      justify-self: end;
     }
 
     .message-meta {
       display: flex;
-      flex-wrap: wrap;
-      gap: 6px 12px;
+      gap: 8px;
       align-items: baseline;
-      margin-bottom: 8px;
+      padding: 0 6px;
+      color: rgba(23, 32, 42, 0.74);
+      font-size: 12px;
+      font-weight: 800;
     }
 
-    .message-name {
+    .message.mine .message-meta {
+      justify-content: flex-end;
+    }
+
+    .bubble {
+      position: relative;
+      width: fit-content;
+      max-width: 100%;
+      padding: 10px 13px;
+      border-radius: 8px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-size: 17px;
+      line-height: 1.55;
+    }
+
+    .message.other .bubble {
+      background: var(--other);
+      border-top-left-radius: 3px;
+    }
+
+    .message.mine .bubble {
+      justify-self: end;
+      background: var(--mine);
+      border-top-right-radius: 3px;
+    }
+
+    .composer {
+      position: sticky;
+      bottom: 0;
+      z-index: 5;
+      border-top: 1px solid var(--line);
+      background: var(--panel);
+      padding: 10px;
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
+    }
+
+    .composer-inner {
+      width: min(760px, 100%);
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: end;
+    }
+
+    label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 54px;
+      max-height: 160px;
+      resize: none;
+      border: 2px solid #c8ccd1;
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      padding: 12px;
+      font-size: 18px;
+      line-height: 1.45;
+    }
+
+    .send {
+      min-width: 84px;
+      min-height: 54px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--button);
+      color: #fff;
+      cursor: pointer;
       font-size: 18px;
       font-weight: 900;
+      touch-action: manipulation;
     }
 
-    .message-date {
-      color: var(--muted);
-      font-size: 14px;
-      font-weight: 700;
+    .send:hover {
+      background: var(--button-dark);
     }
 
-    .message-body {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      margin: 10px 0 14px;
-      font-size: 18px;
-    }
-
-    .empty {
-      padding: 22px 16px;
-      border: 2px dashed #c6bcae;
-      border-radius: 8px;
-      color: var(--muted);
-      text-align: center;
-      font-weight: 700;
-      background: rgba(255, 255, 255, 0.62);
-    }
-
-    .reply-note {
-      display: none;
-      border-left: 5px solid var(--primary);
-      background: #eef8f3;
-      padding: 12px 14px;
-      margin: 0 0 14px;
-      border-radius: 6px;
-      font-weight: 700;
-      overflow-wrap: anywhere;
-      white-space: pre-wrap;
-    }
-
-    .reply-note.active {
-      display: block;
-    }
-
-    .small {
-      color: var(--muted);
-      font-size: 14px;
-      margin: 0;
-    }
-
-    @media (min-width: 680px) {
-      .app {
-        padding-top: 28px;
+    @media (min-width: 760px) {
+      .topbar {
+        padding-inline: 22px;
       }
 
-      .panel {
-        padding: 24px;
+      h1 {
+        font-size: 25px;
       }
 
-      .actions {
-        grid-template-columns: 1fr auto;
-      }
-
-      .primary {
-        min-width: 220px;
-      }
-    }
-
-    @media (max-width: 420px) {
-      .toolbar {
-        grid-template-columns: 1fr;
-      }
-
-      .toolbar .secondary {
-        width: 100%;
+      .chat {
+        padding-top: 22px;
       }
     }
   </style>
 </head>
 <body>
   <main class="app">
-    <header>
+    <header class="topbar">
       <h1>やんさんチャット</h1>
-      <p class="subtitle">LINEグループへの送信と、グループ投稿の確認ができます。</p>
+      <p class="status" id="listStatus" role="status" aria-live="polite">読み込み中</p>
     </header>
 
-    <section class="panel" aria-labelledby="formTitle">
-      <h2 id="formTitle">メッセージ送信</h2>
-      <p class="status" id="replyNote" aria-live="polite"></p>
-
-      <form id="messageForm">
-        <div class="field">
-          <span class="label">送信者名</span>
-          <span class="sender">やんさん</span>
-        </div>
-
-        <div class="field">
-          <label for="messageText">本文</label>
-          <textarea id="messageText" required placeholder="ここにメッセージを入力してください"></textarea>
-        </div>
-
-        <div class="actions">
-          <button class="primary" id="sendButton" type="submit">LINEへ送信</button>
-          <button class="ghost danger" id="clearReplyButton" type="button" hidden>返信を取り消す</button>
-        </div>
-      </form>
-
-      <p class="status" id="sendStatus" role="status" aria-live="polite"></p>
-    </section>
-
-    <section aria-labelledby="listTitle">
-      <div class="toolbar">
-        <h2 id="listTitle">メッセージ一覧</h2>
-        <button class="secondary" id="reloadButton" type="button" disabled>停止中</button>
-      </div>
+    <section class="chat" id="chatLog" aria-label="メッセージ一覧">
       <div class="messages" id="messages" aria-live="polite">
-        <div class="empty">現在、一覧取得は停止中です。</div>
+        <div class="empty">メッセージを読み込んでいます。</div>
       </div>
-      <p class="status" id="listStatus" role="status" aria-live="polite"></p>
     </section>
+
+    <form class="composer" id="messageForm">
+      <div class="composer-inner">
+        <label for="messageText">本文</label>
+        <textarea id="messageText" required placeholder="メッセージを入力"></textarea>
+        <button class="send" id="sendButton" type="submit">送信</button>
+      </div>
+    </form>
   </main>
 
   <script>
@@ -369,54 +272,48 @@
 
       var SENDER_NAME = "やんさん";
       var GAS_URL = "https://script.google.com/macros/s/AKfycbwFI1JIj6WL2I2p1Fto8BBjpv5w4SQAiixaesjsiUIXx-RXoirQM3HOeeJ1FW38RwkA_w/exec";
+      var REFRESH_MS = 12000;
       var messageForm = document.getElementById("messageForm");
       var messageText = document.getElementById("messageText");
-      var sendButton = document.getElementById("sendButton");
-      var sendStatus = document.getElementById("sendStatus");
       var listStatus = document.getElementById("listStatus");
       var messages = document.getElementById("messages");
-      var reloadButton = document.getElementById("reloadButton");
-      var replyNote = document.getElementById("replyNote");
-      var clearReplyButton = document.getElementById("clearReplyButton");
-      var replyTarget = null;
-
-      showStatus(listStatus, "GASへのGETアクセスは停止しています。", "");
-
-      clearReplyButton.addEventListener("click", function () {
-        replyTarget = null;
-        replyNote.textContent = "";
-        replyNote.className = "status";
-        clearReplyButton.hidden = true;
-        messageText.value = "";
-        messageText.focus();
-      });
+      var chatLog = document.getElementById("chatLog");
+      var jsonpTimer = null;
+      var jsonpCounter = 0;
+      var latestSignature = "";
 
       messageForm.addEventListener("submit", function (event) {
         event.preventDefault();
         sendMessage();
       });
 
+      messageText.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          sendMessage();
+        }
+      });
+
+      loadMessages();
+      setInterval(loadMessages, REFRESH_MS);
+
       function sendMessage() {
         var body = messageText.value.trim();
         if (!body) {
-          showStatus(sendStatus, "本文を入力してください。", "error");
           messageText.focus();
           return;
         }
 
         var payload = {
           sender: SENDER_NAME,
+          senderName: SENDER_NAME,
           text: body,
           body: body,
-          replyTo: replyTarget
+          sourceType: "githubPages"
         };
 
         messageText.value = "";
-        replyTarget = null;
-        replyNote.textContent = "";
-        replyNote.className = "status";
-        clearReplyButton.hidden = true;
-        showStatus(sendStatus, "送信しました。", "");
+        showStatus("送信しました", "");
 
         void fetch(GAS_URL, {
           method: "POST",
@@ -426,77 +323,123 @@
           },
           body: JSON.stringify(payload)
         });
+
+        window.setTimeout(loadMessages, 900);
+      }
+
+      function loadMessages() {
+        var callbackName = "__yansanMessages" + Date.now() + "_" + jsonpCounter;
+        jsonpCounter += 1;
+
+        if (jsonpTimer) {
+          window.clearTimeout(jsonpTimer);
+          jsonpTimer = null;
+        }
+
+        window[callbackName] = function (data) {
+          cleanupJsonp(callbackName);
+          var rows = Array.isArray(data && data.messages) ? data.messages : [];
+          renderMessages(rows);
+          showStatus(formatCount(rows.length), "");
+        };
+
+        var script = document.createElement("script");
+        script.src = GAS_URL + "?callback=" + encodeURIComponent(callbackName) + "&limit=50&_=" + Date.now();
+        script.async = true;
+        script.dataset.jsonpCallback = callbackName;
+        script.onerror = function () {
+          cleanupJsonp(callbackName);
+          showStatus("読み込み失敗", "error");
+        };
+
+        jsonpTimer = window.setTimeout(function () {
+          cleanupJsonp(callbackName);
+          showStatus("読み込み失敗", "error");
+        }, 8000);
+
+        document.head.appendChild(script);
+      }
+
+      function cleanupJsonp(callbackName) {
+        var script = document.querySelector('script[data-jsonp-callback="' + callbackName + '"]');
+        if (script && script.parentNode) {
+          script.parentNode.removeChild(script);
+        }
+        if (jsonpTimer) {
+          window.clearTimeout(jsonpTimer);
+          jsonpTimer = null;
+        }
+        try {
+          delete window[callbackName];
+        } catch (error) {
+          window[callbackName] = undefined;
+        }
       }
 
       function renderMessages(rows) {
+        var signature = JSON.stringify(rows);
+        if (signature === latestSignature) {
+          return;
+        }
+        latestSignature = signature;
         messages.innerHTML = "";
+
         if (!rows.length) {
           messages.innerHTML = '<div class="empty">まだメッセージはありません。</div>';
           return;
         }
 
         rows.forEach(function (row) {
+          var senderName = getField(row, ["senderName", "sender", "name", "userName"]) || "不明";
+          var text = getField(row, ["text", "body", "message"]) || "";
+          var timestamp = getField(row, ["timestamp", "datetime", "date"]);
+          var isMine = senderName === SENDER_NAME || getField(row, ["sourceType"]) === "githubPages";
+
           var item = document.createElement("article");
-          item.className = "message";
+          item.className = "message " + (isMine ? "mine" : "other");
 
           var meta = document.createElement("div");
           meta.className = "message-meta";
 
           var name = document.createElement("span");
-          name.className = "message-name";
-          name.textContent = getField(row, ["sender", "name", "userName", "送信者名"]) || "不明";
+          name.textContent = senderName;
 
-          var date = document.createElement("time");
-          date.className = "message-date";
-          var rawDate = getField(row, ["datetime", "timestamp", "date", "日時"]);
-          date.textContent = formatDate(rawDate);
-          if (rawDate && !Number.isNaN(new Date(rawDate).getTime())) {
-            date.dateTime = new Date(rawDate).toISOString();
+          var time = document.createElement("time");
+          time.textContent = formatTime(timestamp);
+          if (timestamp && !Number.isNaN(new Date(timestamp).getTime())) {
+            time.dateTime = new Date(timestamp).toISOString();
           }
 
-          var body = document.createElement("div");
-          body.className = "message-body";
-          body.textContent = getField(row, ["body", "text", "message", "本文"]) || "";
-
-          var replyButton = document.createElement("button");
-          replyButton.className = "ghost";
-          replyButton.type = "button";
-          replyButton.textContent = "返信する";
-          replyButton.addEventListener("click", function () {
-            startReply(name.textContent, body.textContent);
-          });
+          var bubble = document.createElement("div");
+          bubble.className = "bubble";
+          bubble.textContent = text;
 
           meta.appendChild(name);
-          meta.appendChild(date);
+          meta.appendChild(time);
           item.appendChild(meta);
-          item.appendChild(body);
-          item.appendChild(replyButton);
+          item.appendChild(bubble);
           messages.appendChild(item);
         });
+
+        scrollToBottom();
       }
 
-      function startReply(name, text) {
-        var firstLine = (text || "").split(/\r?\n/)[0] || "";
-        var quote = "＞" + name + "：" + firstLine;
-        replyTarget = {
-          sender: name,
-          body: text
-        };
-        messageText.value = quote + "\n";
-        replyNote.textContent = "返信先: " + quote;
-        replyNote.className = "status reply-note active";
-        clearReplyButton.hidden = false;
-        messageText.focus();
-        messageText.setSelectionRange(messageText.value.length, messageText.value.length);
-        window.scrollTo({
-          top: messageForm.getBoundingClientRect().top + window.scrollY - 16,
-          behavior: "smooth"
+      function scrollToBottom() {
+        window.requestAnimationFrame(function () {
+          chatLog.scrollTop = chatLog.scrollHeight;
         });
       }
 
-      function showStatus(element, message, type) {
-        element.textContent = message;
-        element.className = "status" + (type ? " " + type : "");
+      function showStatus(message, type) {
+        listStatus.textContent = message;
+        listStatus.className = "status" + (type ? " " + type : "");
+      }
+
+      function formatCount(count) {
+        if (!count) {
+          return "0件";
+        }
+        return count + "件";
       }
 
       function getField(row, keys) {
@@ -508,26 +451,15 @@
         return "";
       }
 
-      function sortNewestFirst(rows) {
-        return rows.slice().sort(function (a, b) {
-          var aTime = Date.parse(getField(a, ["datetime", "timestamp", "date", "日時"])) || 0;
-          var bTime = Date.parse(getField(b, ["datetime", "timestamp", "date", "日時"])) || 0;
-          return bTime - aTime;
-        });
-      }
-
-      function formatDate(value) {
+      function formatTime(value) {
         if (!value) {
-          return "日時不明";
+          return "";
         }
         var date = new Date(value);
         if (Number.isNaN(date.getTime())) {
           return String(value);
         }
         return new Intl.DateTimeFormat("ja-JP", {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
           hour: "2-digit",
           minute: "2-digit"
         }).format(date);

@@ -11,6 +11,11 @@ function doPost(e) {
     return ContentService.createTextOutput("ok");
   }
 
+  if (data.action === "deleteGroup") {
+    deleteGroup(String(data.groupId || ""));
+    return ContentService.createTextOutput("ok");
+  }
+
   handlePagesMessage(data);
   return ContentService.createTextOutput("ok");
 }
@@ -243,6 +248,25 @@ function getGroups() {
     .sort(function (a, b) {
       return new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime();
     });
+}
+
+function deleteGroup(groupId) {
+  if (!groupId) {
+    return;
+  }
+
+  const sheet = getGroupSheet();
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    return;
+  }
+
+  const values = sheet.getRange(2, 1, lastRow - 1, GROUP_HEADERS.length).getValues();
+  for (let i = values.length - 1; i >= 0; i -= 1) {
+    if (values[i][0] === groupId) {
+      sheet.deleteRow(i + 2);
+    }
+  }
 }
 
 function getGroupName(groupId) {

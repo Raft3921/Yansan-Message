@@ -213,8 +213,15 @@
       line-height: 1.45;
     }
 
-    select {
+    .group-row {
       grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
+
+    select {
       width: 100%;
       min-height: 46px;
       border: 2px solid #c8ccd1;
@@ -224,6 +231,24 @@
       padding: 8px 10px;
       font-size: 16px;
       font-weight: 800;
+    }
+
+    .delete-group {
+      min-width: 72px;
+      min-height: 46px;
+      border: 0;
+      border-radius: 8px;
+      background: #d7dde4;
+      color: #26313d;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 900;
+      touch-action: manipulation;
+    }
+
+    .delete-group:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
     }
 
     .send {
@@ -273,9 +298,12 @@
 
     <form class="composer" id="messageForm">
       <div class="composer-inner">
-        <select id="groupSelect" aria-label="送信先グループ">
-          <option value="">既定のグループ</option>
-        </select>
+        <div class="group-row">
+          <select id="groupSelect" aria-label="送信先グループ">
+            <option value="">既定のグループ</option>
+          </select>
+          <button class="delete-group" id="deleteGroupButton" type="button" disabled>削除</button>
+        </div>
         <label for="messageText">本文</label>
         <textarea id="messageText" required placeholder="メッセージを入力"></textarea>
         <button class="send" id="sendButton" type="submit">送信</button>
@@ -293,6 +321,7 @@
       var messageForm = document.getElementById("messageForm");
       var messageText = document.getElementById("messageText");
       var groupSelect = document.getElementById("groupSelect");
+      var deleteGroupButton = document.getElementById("deleteGroupButton");
       var listStatus = document.getElementById("listStatus");
       var messages = document.getElementById("messages");
       var chatLog = document.getElementById("chatLog");
@@ -319,9 +348,14 @@
 
       groupSelect.addEventListener("change", function () {
         selectedGroupId = groupSelect.value;
+        updateDeleteGroupButton();
         latestSignature = "";
         messages.innerHTML = '<div class="empty">メッセージを読み込んでいます。</div>';
         loadMessages();
+      });
+
+      deleteGroupButton.addEventListener("click", function () {
+        deleteSelectedGroup();
       });
 
       function sendMessage() {
@@ -353,6 +387,41 @@
         });
 
         window.setTimeout(loadMessages, 900);
+      }
+
+      function deleteSelectedGroup() {
+        var groupId = groupSelect.value;
+        if (!groupId) {
+          return;
+        }
+
+        var groupName = groupSelect.options[groupSelect.selectedIndex].textContent;
+        if (!window.confirm(groupName + " を選択肢から削除しますか？")) {
+          return;
+        }
+
+        void fetch(GAS_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8"
+          },
+          body: JSON.stringify({
+            action: "deleteGroup",
+            groupId: groupId
+          })
+        });
+
+        selectedGroupId = "";
+        groupSelect.value = "";
+        updateDeleteGroupButton();
+        latestSignature = "";
+        messages.innerHTML = '<div class="empty">メッセージを読み込んでいます。</div>';
+        showStatus("グループを削除しました", "");
+        window.setTimeout(function () {
+          loadGroups();
+          loadMessages();
+        }, 600);
       }
 
       function loadMessages() {
@@ -496,6 +565,11 @@
 
         groupSelect.value = currentValue;
         selectedGroupId = groupSelect.value;
+        updateDeleteGroupButton();
+      }
+
+      function updateDeleteGroupButton() {
+        deleteGroupButton.disabled = !groupSelect.value;
       }
 
       function scrollToBottom() {

@@ -400,7 +400,7 @@
         sendMessage();
       });
 
-      async function sendMessage() {
+      function sendMessage() {
         var body = messageText.value.trim();
         if (!body) {
           showStatus(sendStatus, "本文を入力してください。", "error");
@@ -416,30 +416,23 @@
           replyTo: replyTarget
         };
 
-        setSending(true);
-        showStatus(sendStatus, "送信中です。", "");
+        messageText.value = "";
+        replyTarget = null;
+        replyNote.textContent = "";
+        replyNote.className = "status";
+        clearReplyButton.hidden = true;
+        showStatus(sendStatus, "送信しました。", "success");
 
-        try {
-          await fetch(GAS_URL, {
-            method: "POST",
-            mode: "no-cors",
-            headers: {
-              "Content-Type": "text/plain;charset=utf-8"
-            },
-            body: JSON.stringify(payload)
-          });
-
-          messageText.value = "";
-          replyTarget = null;
-          replyNote.textContent = "";
-          replyNote.className = "status";
-          clearReplyButton.hidden = true;
-          showStatus(sendStatus, "送信しました。", "success");
-        } catch (error) {
-          showStatus(sendStatus, "送信エラー: " + error.message, "error");
-        } finally {
-          setSending(false);
-        }
+        fetch(GAS_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8"
+          },
+          body: JSON.stringify(payload)
+        }).catch(function () {
+          showStatus(sendStatus, "送信できなかった可能性があります。通信状態を確認してください。", "error");
+        });
       }
 
       function renderMessages(rows) {
@@ -511,11 +504,6 @@
       function showStatus(element, message, type) {
         element.textContent = message;
         element.className = "status" + (type ? " " + type : "");
-      }
-
-      function setSending(isSending) {
-        sendButton.disabled = isSending;
-        sendButton.textContent = isSending ? "送信中..." : "LINEへ送信";
       }
 
       function getField(row, keys) {

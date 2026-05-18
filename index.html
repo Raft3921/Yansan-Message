@@ -358,10 +358,10 @@
     <section aria-labelledby="listTitle">
       <div class="toolbar">
         <h2 id="listTitle">メッセージ一覧</h2>
-        <button class="secondary" id="reloadButton" type="button">再読み込み</button>
+        <button class="secondary" id="reloadButton" type="button" disabled>停止中</button>
       </div>
       <div class="messages" id="messages" aria-live="polite">
-        <div class="empty">読み込み中です。</div>
+        <div class="empty">現在、一覧取得は停止中です。</div>
       </div>
       <p class="status" id="listStatus" role="status" aria-live="polite"></p>
     </section>
@@ -384,9 +384,7 @@
       var clearReplyButton = document.getElementById("clearReplyButton");
       var replyTarget = null;
 
-      loadMessages();
-
-      reloadButton.addEventListener("click", loadMessages);
+      showStatus(listStatus, "GASへのGETアクセスは停止しています。", "");
 
       clearReplyButton.addEventListener("click", function () {
         replyTarget = null;
@@ -422,18 +420,14 @@
         showStatus(sendStatus, "送信中です。", "");
 
         try {
-          var response = await fetch(GAS_URL, {
+          await fetch(GAS_URL, {
             method: "POST",
-            mode: "cors",
+            mode: "no-cors",
             headers: {
               "Content-Type": "text/plain;charset=utf-8"
             },
             body: JSON.stringify(payload)
           });
-          var data = await readJson(response);
-          if (!response.ok || data.ok === false) {
-            throw new Error(data.error || "送信できませんでした。");
-          }
 
           messageText.value = "";
           replyTarget = null;
@@ -441,36 +435,10 @@
           replyNote.className = "status";
           clearReplyButton.hidden = true;
           showStatus(sendStatus, "送信しました。", "success");
-          await loadMessages();
         } catch (error) {
           showStatus(sendStatus, "送信エラー: " + error.message, "error");
         } finally {
           setSending(false);
-        }
-      }
-
-      async function loadMessages() {
-        reloadButton.disabled = true;
-        showStatus(listStatus, "読み込み中です。", "");
-
-        try {
-          var response = await fetch(GAS_URL, {
-            method: "GET",
-            mode: "cors"
-          });
-          var data = await readJson(response);
-          if (!response.ok || data.ok === false) {
-            throw new Error(data.error || "一覧を取得できませんでした。");
-          }
-
-          var rows = Array.isArray(data.messages) ? data.messages : Array.isArray(data) ? data : [];
-          renderMessages(sortNewestFirst(rows));
-          showStatus(listStatus, rows.length + "件を表示しています。", "success");
-        } catch (error) {
-          messages.innerHTML = '<div class="empty">メッセージを読み込めませんでした。</div>';
-          showStatus(listStatus, "読み込みエラー: " + error.message + " GAS側の公開設定とCORS応答を確認してください。", "error");
-        } finally {
-          reloadButton.disabled = false;
         }
       }
 
@@ -547,20 +515,7 @@
 
       function setSending(isSending) {
         sendButton.disabled = isSending;
-        reloadButton.disabled = isSending;
         sendButton.textContent = isSending ? "送信中..." : "LINEへ送信";
-      }
-
-      async function readJson(response) {
-        var text = await response.text();
-        if (!text) {
-          return {};
-        }
-        try {
-          return JSON.parse(text);
-        } catch (error) {
-          throw new Error("GASからJSON以外の応答が返りました。");
-        }
       }
 
       function getField(row, keys) {

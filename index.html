@@ -331,18 +331,6 @@
       <p class="subtitle">LINEグループへの送信と、グループ投稿の確認ができます。</p>
     </header>
 
-    <details class="panel settings" id="settingsPanel">
-      <summary>GAS WebアプリURL設定</summary>
-      <div class="field">
-        <label for="gasUrl">WebアプリURL</label>
-        <input id="gasUrl" type="url" inputmode="url" autocomplete="url" placeholder="https://script.google.com/macros/s/.../exec">
-        <p class="small">このURLはブラウザ内に保存されます。LINEの秘密情報はGAS側だけに置いてください。</p>
-      </div>
-      <div class="actions">
-        <button class="secondary" id="saveUrlButton" type="button">URLを保存</button>
-      </div>
-    </details>
-
     <section class="panel" aria-labelledby="formTitle">
       <h2 id="formTitle">メッセージ送信</h2>
       <p class="status" id="replyNote" aria-live="polite"></p>
@@ -384,9 +372,7 @@
       "use strict";
 
       var SENDER_NAME = "やんさん";
-      var STORAGE_KEY = "yansanChatGasUrl";
-      var gasUrlInput = document.getElementById("gasUrl");
-      var saveUrlButton = document.getElementById("saveUrlButton");
+      var GAS_URL = "https://script.google.com/macros/s/AKfycbyYl8XTyEnFZOEMZKFXpGR3xvbAQe9tCr9fdtnscpfHz2tI8obB_hTKaJuS2leQw9iO/exec";
       var messageForm = document.getElementById("messageForm");
       var messageText = document.getElementById("messageText");
       var sendButton = document.getElementById("sendButton");
@@ -396,30 +382,9 @@
       var reloadButton = document.getElementById("reloadButton");
       var replyNote = document.getElementById("replyNote");
       var clearReplyButton = document.getElementById("clearReplyButton");
-      var settingsPanel = document.getElementById("settingsPanel");
       var replyTarget = null;
 
-      gasUrlInput.value = localStorage.getItem(STORAGE_KEY) || "";
-      if (!gasUrlInput.value) {
-        settingsPanel.open = true;
-        messages.innerHTML = '<div class="empty">先にGAS WebアプリURLを設定してください。</div>';
-      } else {
-        loadMessages();
-      }
-
-      saveUrlButton.addEventListener("click", function () {
-        var url = normalizeUrl(gasUrlInput.value);
-        if (!url) {
-          showStatus(sendStatus, "GAS WebアプリURLを入力してください。", "error");
-          gasUrlInput.focus();
-          return;
-        }
-        localStorage.setItem(STORAGE_KEY, url);
-        gasUrlInput.value = url;
-        settingsPanel.open = false;
-        showStatus(sendStatus, "URLを保存しました。", "success");
-        loadMessages();
-      });
+      loadMessages();
 
       reloadButton.addEventListener("click", loadMessages);
 
@@ -438,14 +403,7 @@
       });
 
       async function sendMessage() {
-        var url = getGasUrl();
         var body = messageText.value.trim();
-        if (!url) {
-          showStatus(sendStatus, "GAS WebアプリURLを設定してください。", "error");
-          settingsPanel.open = true;
-          gasUrlInput.focus();
-          return;
-        }
         if (!body) {
           showStatus(sendStatus, "本文を入力してください。", "error");
           messageText.focus();
@@ -464,11 +422,11 @@
         showStatus(sendStatus, "送信中です。", "");
 
         try {
-          var response = await fetch(url, {
+          var response = await fetch(GAS_URL, {
             method: "POST",
             mode: "cors",
             headers: {
-              "Content-Type": "application/json"
+              "Content-Type": "text/plain;charset=utf-8"
             },
             body: JSON.stringify(payload)
           });
@@ -492,22 +450,13 @@
       }
 
       async function loadMessages() {
-        var url = getGasUrl();
-        if (!url) {
-          messages.innerHTML = '<div class="empty">GAS WebアプリURLを設定すると一覧を表示します。</div>';
-          return;
-        }
-
         reloadButton.disabled = true;
         showStatus(listStatus, "読み込み中です。", "");
 
         try {
-          var response = await fetch(url, {
+          var response = await fetch(GAS_URL, {
             method: "GET",
-            mode: "cors",
-            headers: {
-              "Accept": "application/json"
-            }
+            mode: "cors"
           });
           var data = await readJson(response);
           if (!response.ok || data.ok === false) {
@@ -519,7 +468,7 @@
           showStatus(listStatus, rows.length + "件を表示しています。", "success");
         } catch (error) {
           messages.innerHTML = '<div class="empty">メッセージを読み込めませんでした。</div>';
-          showStatus(listStatus, "読み込みエラー: " + error.message, "error");
+          showStatus(listStatus, "読み込みエラー: " + error.message + " GAS側の公開設定とCORS応答を確認してください。", "error");
         } finally {
           reloadButton.disabled = false;
         }
@@ -589,14 +538,6 @@
           top: messageForm.getBoundingClientRect().top + window.scrollY - 16,
           behavior: "smooth"
         });
-      }
-
-      function getGasUrl() {
-        return normalizeUrl(localStorage.getItem(STORAGE_KEY) || gasUrlInput.value);
-      }
-
-      function normalizeUrl(value) {
-        return (value || "").trim();
       }
 
       function showStatus(element, message, type) {

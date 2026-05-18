@@ -352,8 +352,8 @@
       }
 
       function loadMessages() {
-        loadJsonp({ limit: "50" }, function (data) {
-          var rows = Array.isArray(data && data.messages) ? data.messages : [];
+        loadJsonp({ action: "messages", limit: "50" }, function (data) {
+          var rows = normalizeList(data, "messages");
           renderMessages(rows);
           showStatus(formatCount(rows.length), "");
         }, function () {
@@ -363,9 +363,11 @@
 
       function loadGroups() {
         loadJsonp({ action: "groups" }, function (data) {
-          var groups = Array.isArray(data && data.groups) ? data.groups : [];
+          var groups = normalizeList(data, "groups");
           renderGroups(groups);
-        }, function () {});
+        }, function () {
+          showStatus("グループ読み込み失敗", "error");
+        });
       }
 
       function loadJsonp(params, onSuccess, onError) {
@@ -391,6 +393,16 @@
         };
 
         document.head.appendChild(script);
+      }
+
+      function normalizeList(data, key) {
+        if (Array.isArray(data)) {
+          return data;
+        }
+        if (Array.isArray(data && data[key])) {
+          return data[key];
+        }
+        return [];
       }
 
       function buildJsonpUrl(callbackName, params) {

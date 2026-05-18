@@ -1,7 +1,9 @@
 const MESSAGE_SHEET_NAME = "messages";
 const GROUP_SHEET_NAME = "groups";
+const DELETED_GROUP_SHEET_NAME = "deletedGroups";
 const SHEET_HEADERS = ["timestamp", "senderName", "userId", "text", "sourceType", "groupId"];
 const GROUP_HEADERS = ["groupId", "groupName", "lastSeenAt"];
+const DELETED_GROUP_HEADERS = ["groupId", "deletedAt"];
 
 function doPost(e) {
   const data = JSON.parse(e.postData.contents || "{}");
@@ -211,6 +213,10 @@ function ensureHeaders(sheet, headers) {
 }
 
 function upsertGroup(groupId) {
+  if (isDeletedGroup(groupId)) {
+    return;
+  }
+
   const sheet = getGroupSheet();
   const lastRow = sheet.getLastRow();
   const groupName = getGroupName(groupId);
@@ -244,6 +250,9 @@ function getGroups() {
         lastSeenAt: row[2]
       };
     })
+    .filter(function (group) {
+      return group.groupId && !isDeletedGroup(group.groupId);
+    })
     .sort(function (a, b) {
       return new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime();
     });
@@ -253,6 +262,8 @@ function deleteGroup(groupId) {
   if (!groupId) {
     return;
   }
+
+  addDeletedGroup(groupId);
 
   const sheet = getGroupSheet();
   const lastRow = sheet.getLastRow();
@@ -266,6 +277,54 @@ function deleteGroup(groupId) {
       sheet.deleteRow(i + 2);
     }
   }
+}
+
+function getDeletedGroupSheet() {
+  const sheetId = PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
+  const spreadsheet = SpreadsheetApp.openById(sheetId);
+  const sheet = spreadsheet.getSheetByName(DELETED_GROUP_SHEET_NAME) || spreadsheet.insertSheet(DELETED_GROUP_SHEET_NAME);
+
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(DELETED_GROUP_HEADERS);
+  } else {
+    ensureHeaders(sheet, DELETED_GROUP_HEADERS);
+  }
+
+  return sheet;
+}
+
+function addDeletedGroup(groupId) {
+  const sheet = getDeletedGroupSheet();
+  const lastRow = sheet.getLastRow();
+
+  if (lastRow > 1) {
+    const values = sheet.getRange(2, 1, lastRow - 1, DELETED_GROUP_HEADERS.length).getValues();
+    for (let i = 0; i < values.length; i += 1) {
+      if (values[i][0] === groupId) {
+        sheet.getRange(i + 2, 2).setValue(new Date().toISOString());
+        return;
+      }
+    }
+  }
+
+  sheet.appendRow([groupId, new Date().toISOString()]);
+}
+
+function isDeletedGroup(groupId) {
+  if (!groupId) {
+    return false;
+  }
+
+  const sheet = getDeletedGroupSheet();
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    return false;
+  }
+
+  const values = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  return values.some(function (row) {
+    return row[0] === groupId;
+  });
 }
 
 function getGroupName(groupId) {

@@ -73,11 +73,25 @@
       box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
     }
 
+    .title-block {
+      min-width: 0;
+    }
+
     h1 {
       margin: 0;
       font-size: 22px;
       line-height: 1.2;
       letter-spacing: 0;
+    }
+
+    .current-group {
+      margin: 3px 0 0;
+      color: rgba(255, 255, 255, 0.92);
+      font-size: 13px;
+      font-weight: 800;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .status {
@@ -286,7 +300,10 @@
 <body>
   <main class="app">
     <header class="topbar">
-      <h1>やんさんチャット</h1>
+      <div class="title-block">
+        <h1>やんさんチャット</h1>
+        <p class="current-group" id="currentGroupName">グループ読み込み中</p>
+      </div>
       <p class="status" id="listStatus" role="status" aria-live="polite">読み込み中</p>
     </header>
 
@@ -319,10 +336,12 @@
       var GAS_URL = "https://script.google.com/macros/s/AKfycbwFI1JIj6WL2I2p1Fto8BBjpv5w4SQAiixaesjsiUIXx-RXoirQM3HOeeJ1FW38RwkA_w/exec";
       var REFRESH_MS = 12000;
       var SELECTED_GROUP_KEY = "yansanSelectedGroupId";
+      var DELETED_GROUPS_KEY = "yansanDeletedGroupIds";
       var messageForm = document.getElementById("messageForm");
       var messageText = document.getElementById("messageText");
       var groupSelect = document.getElementById("groupSelect");
       var deleteGroupButton = document.getElementById("deleteGroupButton");
+      var currentGroupName = document.getElementById("currentGroupName");
       var listStatus = document.getElementById("listStatus");
       var messages = document.getElementById("messages");
       var chatLog = document.getElementById("chatLog");
@@ -353,6 +372,7 @@
       groupSelect.addEventListener("change", function () {
         setSelectedGroupId(groupSelect.value);
         updateDeleteGroupButton();
+        updateCurrentGroupName(getSelectedGroupName());
         latestSignature = "";
         messages.innerHTML = '<div class="empty">メッセージを読み込んでいます。</div>';
         if (selectedGroupId) {
@@ -422,9 +442,11 @@
           })
         });
 
+        addDeletedGroupId(groupId);
         setSelectedGroupId("");
         groupSelect.value = "";
         updateDeleteGroupButton();
+        updateCurrentGroupName("");
         latestSignature = "";
         messages.innerHTML = '<div class="empty">メッセージを読み込んでいます。</div>';
         showStatus("グループを削除しました", "");
@@ -567,12 +589,13 @@
       function renderGroups(groups) {
         var currentValue = selectedGroupId || localStorage.getItem(SELECTED_GROUP_KEY) || "";
         var hasCurrent = false;
+        var deletedGroupIds = getDeletedGroupIds();
+        var visibleGroups = groups.filter(function (group) {
+          return group.groupId && deletedGroupIds.indexOf(group.groupId) === -1;
+        });
         groupSelect.innerHTML = "";
 
-        groups.forEach(function (group) {
-          if (!group.groupId) {
-            return;
-          }
+        visibleGroups.forEach(function (group) {
           var option = document.createElement("option");
           option.value = group.groupId;
           option.textContent = group.groupName || group.groupId;
@@ -582,17 +605,19 @@
           }
         });
 
-        if (!groups.length) {
+        if (!visibleGroups.length) {
           var emptyOption = document.createElement("option");
           emptyOption.value = "";
           emptyOption.textContent = "グループがありません";
           groupSelect.appendChild(emptyOption);
           setSelectedGroupId("");
+          updateCurrentGroupName("");
           messages.innerHTML = '<div class="empty">LINEグループでメッセージを受信すると、ここにグループが表示されます。</div>';
           showStatus("グループなし", "");
         } else {
-          setSelectedGroupId(hasCurrent ? currentValue : groups[0].groupId);
+          setSelectedGroupId(hasCurrent ? currentValue : visibleGroups[0].groupId);
           groupSelect.value = selectedGroupId;
+          updateCurrentGroupName(getSelectedGroupName());
           latestSignature = "";
           messages.innerHTML = '<div class="empty">メッセージを読み込んでいます。</div>';
           loadMessages();
@@ -612,6 +637,35 @@
 
       function updateDeleteGroupButton() {
         deleteGroupButton.disabled = !groupSelect.value;
+      }
+
+      function updateCurrentGroupName(name) {
+        currentGroupName.textContent = name || "グループ未選択";
+      }
+
+      function getSelectedGroupName() {
+        if (!groupSelect.value || groupSelect.selectedIndex < 0) {
+          return "";
+        }
+        return groupSelect.options[groupSelect.selectedIndex].textContent;
+      }
+
+      function getDeletedGroupIds() {
+        try {
+          var value = localStorage.getItem(DELETED_GROUPS_KEY);
+          var parsed = value ? JSON.parse(value) : [];
+          return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+          return [];
+        }
+      }
+
+      function addDeletedGroupId(groupId) {
+        var ids = getDeletedGroupIds();
+        if (ids.indexOf(groupId) === -1) {
+          ids.push(groupId);
+          localStorage.setItem(DELETED_GROUPS_KEY, JSON.stringify(ids));
+        }
       }
 
       function scrollToBottom() {

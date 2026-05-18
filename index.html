@@ -404,10 +404,9 @@
           return;
         }
 
-        var lineText = SENDER_NAME + "より\n\n" + body;
         var payload = {
           sender: SENDER_NAME,
-          text: lineText,
+          text: body,
           body: body,
           replyTo: replyTarget
         };

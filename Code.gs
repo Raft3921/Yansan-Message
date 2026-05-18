@@ -23,8 +23,7 @@ function doPost(e) {
 function doGet(e) {
   const callback = sanitizeCallback(e.parameter.callback || "callback");
   const action = e.parameter.action || "messages";
-  const defaultGroupId = PropertiesService.getScriptProperties().getProperty("GROUP_ID") || "";
-  const groupId = String(e.parameter.groupId || defaultGroupId);
+  const groupId = String(e.parameter.groupId || "");
   const payload = action === "groups"
     ? { groups: getGroups() }
     : { messages: getLatestMessages(Math.min(Number(e.parameter.limit || 50), 50), groupId) };

@@ -300,7 +300,7 @@
       <div class="composer-inner">
         <div class="group-row">
           <select id="groupSelect" aria-label="送信先グループ">
-            <option value="">既定のグループ</option>
+            <option value="">グループ読み込み中</option>
           </select>
           <button class="delete-group" id="deleteGroupButton" type="button" disabled>削除</button>
         </div>
@@ -318,6 +318,7 @@
       var SENDER_NAME = "やんさん";
       var GAS_URL = "https://script.google.com/macros/s/AKfycbwFI1JIj6WL2I2p1Fto8BBjpv5w4SQAiixaesjsiUIXx-RXoirQM3HOeeJ1FW38RwkA_w/exec";
       var REFRESH_MS = 12000;
+      var SELECTED_GROUP_KEY = "yansanSelectedGroupId";
       var messageForm = document.getElementById("messageForm");
       var messageText = document.getElementById("messageText");
       var groupSelect = document.getElementById("groupSelect");
@@ -327,7 +328,7 @@
       var chatLog = document.getElementById("chatLog");
       var jsonpCounter = 0;
       var latestSignature = "";
-      var selectedGroupId = "";
+      var selectedGroupId = localStorage.getItem(SELECTED_GROUP_KEY) || "";
 
       messageForm.addEventListener("submit", function (event) {
         event.preventDefault();
@@ -341,17 +342,22 @@
         }
       });
 
-      loadMessages();
       loadGroups();
-      setInterval(loadMessages, REFRESH_MS);
+      setInterval(function () {
+        if (selectedGroupId) {
+          loadMessages();
+        }
+      }, REFRESH_MS);
       setInterval(loadGroups, 60000);
 
       groupSelect.addEventListener("change", function () {
-        selectedGroupId = groupSelect.value;
+        setSelectedGroupId(groupSelect.value);
         updateDeleteGroupButton();
         latestSignature = "";
         messages.innerHTML = '<div class="empty">メッセージを読み込んでいます。</div>';
-        loadMessages();
+        if (selectedGroupId) {
+          loadMessages();
+        }
       });
 
       deleteGroupButton.addEventListener("click", function () {
@@ -360,6 +366,10 @@
 
       function sendMessage() {
         var body = messageText.value.trim();
+        if (!selectedGroupId) {
+          showStatus("送信先グループを選択してください", "error");
+          return;
+        }
         if (!body) {
           messageText.focus();
           return;
@@ -412,7 +422,7 @@
           })
         });
 
-        selectedGroupId = "";
+        setSelectedGroupId("");
         groupSelect.value = "";
         updateDeleteGroupButton();
         latestSignature = "";
@@ -420,11 +430,16 @@
         showStatus("グループを削除しました", "");
         window.setTimeout(function () {
           loadGroups();
-          loadMessages();
         }, 600);
       }
 
       function loadMessages() {
+        if (!selectedGroupId) {
+          messages.innerHTML = '<div class="empty">グループを選択してください。</div>';
+          showStatus("グループ未選択", "");
+          return;
+        }
+
         loadJsonp({ action: "messages", groupId: selectedGroupId, limit: "50" }, function (data) {
           var rows = normalizeList(data, "messages");
           renderMessages(rows);
@@ -550,8 +565,9 @@
       }
 
       function renderGroups(groups) {
-        var currentValue = selectedGroupId || groupSelect.value;
-        groupSelect.innerHTML = '<option value="">既定のグループ</option>';
+        var currentValue = selectedGroupId || localStorage.getItem(SELECTED_GROUP_KEY) || "";
+        var hasCurrent = false;
+        groupSelect.innerHTML = "";
 
         groups.forEach(function (group) {
           if (!group.groupId) {
@@ -561,11 +577,37 @@
           option.value = group.groupId;
           option.textContent = group.groupName || group.groupId;
           groupSelect.appendChild(option);
+          if (group.groupId === currentValue) {
+            hasCurrent = true;
+          }
         });
 
-        groupSelect.value = currentValue;
-        selectedGroupId = groupSelect.value;
+        if (!groups.length) {
+          var emptyOption = document.createElement("option");
+          emptyOption.value = "";
+          emptyOption.textContent = "グループがありません";
+          groupSelect.appendChild(emptyOption);
+          setSelectedGroupId("");
+          messages.innerHTML = '<div class="empty">LINEグループでメッセージを受信すると、ここにグループが表示されます。</div>';
+          showStatus("グループなし", "");
+        } else {
+          setSelectedGroupId(hasCurrent ? currentValue : groups[0].groupId);
+          groupSelect.value = selectedGroupId;
+          latestSignature = "";
+          messages.innerHTML = '<div class="empty">メッセージを読み込んでいます。</div>';
+          loadMessages();
+        }
+
         updateDeleteGroupButton();
+      }
+
+      function setSelectedGroupId(groupId) {
+        selectedGroupId = groupId || "";
+        if (selectedGroupId) {
+          localStorage.setItem(SELECTED_GROUP_KEY, selectedGroupId);
+        } else {
+          localStorage.removeItem(SELECTED_GROUP_KEY);
+        }
       }
 
       function updateDeleteGroupButton() {

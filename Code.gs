@@ -1,6 +1,6 @@
 const MESSAGE_SHEET_NAME = "messages";
 const GROUP_SHEET_NAME = "groups";
-const SHEET_HEADERS = ["timestamp", "senderName", "userId", "text", "sourceType"];
+const SHEET_HEADERS = ["timestamp", "senderName", "userId", "text", "sourceType", "groupId"];
 const GROUP_HEADERS = ["groupId", "groupName", "lastSeenAt"];
 
 function doPost(e) {
@@ -18,9 +18,11 @@ function doPost(e) {
 function doGet(e) {
   const callback = sanitizeCallback(e.parameter.callback || "callback");
   const action = e.parameter.action || "messages";
+  const defaultGroupId = PropertiesService.getScriptProperties().getProperty("GROUP_ID") || "";
+  const groupId = String(e.parameter.groupId || defaultGroupId);
   const payload = action === "groups"
     ? { groups: getGroups() }
-    : { messages: getLatestMessages(Math.min(Number(e.parameter.limit || 50), 50)) };
+    : { messages: getLatestMessages(Math.min(Number(e.parameter.limit || 50), 50), groupId) };
   const body = callback + "(" + JSON.stringify(payload) + ");";
 
   return ContentService
@@ -40,6 +42,7 @@ function handleLineWebhook(events) {
 
     const userId = event.source && event.source.userId ? event.source.userId : "";
     const sourceType = event.source && event.source.type ? event.source.type : "";
+    const groupId = event.source && event.source.groupId ? event.source.groupId : "";
     const senderName = getDisplayName(event.source, userId);
     const timestamp = new Date(event.timestamp || Date.now()).toISOString();
 
@@ -48,7 +51,8 @@ function handleLineWebhook(events) {
       senderName: senderName,
       userId: userId,
       text: event.message.text,
-      sourceType: sourceType
+      sourceType: sourceType,
+      groupId: groupId
     });
   });
 }
@@ -64,7 +68,8 @@ function handlePagesMessage(data) {
     senderName: String(data.senderName || data.sender || "やんさん"),
     userId: "github-pages",
     text: text,
-    sourceType: "githubPages"
+    sourceType: "githubPages",
+    groupId: groupId
   });
 
   UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
@@ -88,30 +93,37 @@ function appendMessage(message) {
     message.senderName,
     message.userId,
     message.text,
-    message.sourceType
+    message.sourceType,
+    message.groupId
   ]);
 }
 
-function getLatestMessages(limit) {
+function getLatestMessages(limit, groupId) {
   const sheet = getSheet();
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) {
     return [];
   }
 
-  const count = Math.min(limit, lastRow - 1);
-  const startRow = lastRow - count + 1;
-  const values = sheet.getRange(startRow, 1, count, SHEET_HEADERS.length).getValues();
+  const values = sheet.getRange(2, 1, lastRow - 1, SHEET_HEADERS.length).getValues();
+  const matched = [];
 
-  return values.map(function (row) {
-    return {
+  for (let i = values.length - 1; i >= 0 && matched.length < limit; i -= 1) {
+    const row = values[i];
+    if (String(row[5] || "") !== groupId) {
+      continue;
+    }
+    matched.unshift({
       timestamp: row[0],
       senderName: row[1],
       userId: row[2],
       text: row[3],
-      sourceType: row[4]
-    };
-  });
+      sourceType: row[4],
+      groupId: row[5]
+    });
+  }
+
+  return matched;
 }
 
 function getDisplayName(source, userId) {
@@ -157,6 +169,8 @@ function getSheet() {
 
   if (sheet.getLastRow() === 0) {
     sheet.appendRow(SHEET_HEADERS);
+  } else {
+    ensureHeaders(sheet, SHEET_HEADERS);
   }
 
   return sheet;
@@ -169,9 +183,27 @@ function getGroupSheet() {
 
   if (sheet.getLastRow() === 0) {
     sheet.appendRow(GROUP_HEADERS);
+  } else {
+    ensureHeaders(sheet, GROUP_HEADERS);
   }
 
   return sheet;
+}
+
+function ensureHeaders(sheet, headers) {
+  const current = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
+  let changed = false;
+
+  headers.forEach(function (header, index) {
+    if (current[index] !== header) {
+      current[index] = header;
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([current]);
+  }
 }
 
 function upsertGroup(groupId) {

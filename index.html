@@ -319,6 +319,9 @@
 
       groupSelect.addEventListener("change", function () {
         selectedGroupId = groupSelect.value;
+        latestSignature = "";
+        messages.innerHTML = '<div class="empty">メッセージを読み込んでいます。</div>';
+        loadMessages();
       });
 
       function sendMessage() {
@@ -353,7 +356,7 @@
       }
 
       function loadMessages() {
-        loadJsonp({ action: "messages", limit: "50" }, function (data) {
+        loadJsonp({ action: "messages", groupId: selectedGroupId, limit: "50" }, function (data) {
           var rows = normalizeList(data, "messages");
           renderMessages(rows);
           showStatus(formatCount(rows.length), "");

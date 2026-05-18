@@ -212,6 +212,19 @@
       line-height: 1.45;
     }
 
+    select {
+      grid-column: 1 / -1;
+      width: 100%;
+      min-height: 46px;
+      border: 2px solid #c8ccd1;
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      padding: 8px 10px;
+      font-size: 16px;
+      font-weight: 800;
+    }
+
     .send {
       min-width: 84px;
       min-height: 54px;
@@ -259,6 +272,9 @@
 
     <form class="composer" id="messageForm">
       <div class="composer-inner">
+        <select id="groupSelect" aria-label="送信先グループ">
+          <option value="">既定のグループ</option>
+        </select>
         <label for="messageText">本文</label>
         <textarea id="messageText" required placeholder="メッセージを入力"></textarea>
         <button class="send" id="sendButton" type="submit">送信</button>
@@ -275,12 +291,13 @@
       var REFRESH_MS = 12000;
       var messageForm = document.getElementById("messageForm");
       var messageText = document.getElementById("messageText");
+      var groupSelect = document.getElementById("groupSelect");
       var listStatus = document.getElementById("listStatus");
       var messages = document.getElementById("messages");
       var chatLog = document.getElementById("chatLog");
-      var jsonpTimer = null;
       var jsonpCounter = 0;
       var latestSignature = "";
+      var selectedGroupId = "";
 
       messageForm.addEventListener("submit", function (event) {
         event.preventDefault();
@@ -295,7 +312,13 @@
       });
 
       loadMessages();
+      loadGroups();
       setInterval(loadMessages, REFRESH_MS);
+      setInterval(loadGroups, 60000);
+
+      groupSelect.addEventListener("change", function () {
+        selectedGroupId = groupSelect.value;
+      });
 
       function sendMessage() {
         var body = messageText.value.trim();
@@ -309,7 +332,8 @@
           senderName: SENDER_NAME,
           text: body,
           body: body,
-          sourceType: "githubPages"
+          sourceType: "githubPages",
+          groupId: selectedGroupId
         };
 
         messageText.value = "";
@@ -328,46 +352,62 @@
       }
 
       function loadMessages() {
-        var callbackName = "__yansanMessages" + Date.now() + "_" + jsonpCounter;
-        jsonpCounter += 1;
-
-        if (jsonpTimer) {
-          window.clearTimeout(jsonpTimer);
-          jsonpTimer = null;
-        }
-
-        window[callbackName] = function (data) {
-          cleanupJsonp(callbackName);
+        loadJsonp({ limit: "50" }, function (data) {
           var rows = Array.isArray(data && data.messages) ? data.messages : [];
           renderMessages(rows);
           showStatus(formatCount(rows.length), "");
+        }, function () {
+          showStatus("読み込み失敗", "error");
+        });
+      }
+
+      function loadGroups() {
+        loadJsonp({ action: "groups" }, function (data) {
+          var groups = Array.isArray(data && data.groups) ? data.groups : [];
+          renderGroups(groups);
+        }, function () {});
+      }
+
+      function loadJsonp(params, onSuccess, onError) {
+        var callbackName = "__yansanMessages" + Date.now() + "_" + jsonpCounter;
+        jsonpCounter += 1;
+
+        window[callbackName] = function (data) {
+          cleanupJsonp(callbackName);
+          onSuccess(data);
         };
 
         var script = document.createElement("script");
-        script.src = GAS_URL + "?callback=" + encodeURIComponent(callbackName) + "&limit=50&_=" + Date.now();
+        script.src = buildJsonpUrl(callbackName, params);
         script.async = true;
         script.dataset.jsonpCallback = callbackName;
+        script.dataset.jsonpTimer = String(window.setTimeout(function () {
+          cleanupJsonp(callbackName);
+          onError();
+        }, 8000));
         script.onerror = function () {
           cleanupJsonp(callbackName);
-          showStatus("読み込み失敗", "error");
+          onError();
         };
 
-        jsonpTimer = window.setTimeout(function () {
-          cleanupJsonp(callbackName);
-          showStatus("読み込み失敗", "error");
-        }, 8000);
-
         document.head.appendChild(script);
+      }
+
+      function buildJsonpUrl(callbackName, params) {
+        var query = ["callback=" + encodeURIComponent(callbackName), "_=" + Date.now()];
+        Object.keys(params || {}).forEach(function (key) {
+          query.push(encodeURIComponent(key) + "=" + encodeURIComponent(params[key]));
+        });
+        return GAS_URL + "?" + query.join("&");
       }
 
       function cleanupJsonp(callbackName) {
         var script = document.querySelector('script[data-jsonp-callback="' + callbackName + '"]');
         if (script && script.parentNode) {
+          if (script.dataset.jsonpTimer) {
+            window.clearTimeout(Number(script.dataset.jsonpTimer));
+          }
           script.parentNode.removeChild(script);
-        }
-        if (jsonpTimer) {
-          window.clearTimeout(jsonpTimer);
-          jsonpTimer = null;
         }
         try {
           delete window[callbackName];
@@ -422,6 +462,24 @@
         });
 
         scrollToBottom();
+      }
+
+      function renderGroups(groups) {
+        var currentValue = selectedGroupId || groupSelect.value;
+        groupSelect.innerHTML = '<option value="">既定のグループ</option>';
+
+        groups.forEach(function (group) {
+          if (!group.groupId) {
+            return;
+          }
+          var option = document.createElement("option");
+          option.value = group.groupId;
+          option.textContent = group.groupName || group.groupId;
+          groupSelect.appendChild(option);
+        });
+
+        groupSelect.value = currentValue;
+        selectedGroupId = groupSelect.value;
       }
 
       function scrollToBottom() {

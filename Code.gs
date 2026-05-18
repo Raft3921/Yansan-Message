@@ -1,4 +1,7 @@
+const MESSAGE_SHEET_NAME = "messages";
+const GROUP_SHEET_NAME = "groups";
 const SHEET_HEADERS = ["timestamp", "senderName", "userId", "text", "sourceType"];
+const GROUP_HEADERS = ["groupId", "groupName", "lastSeenAt"];
 
 function doPost(e) {
   const data = JSON.parse(e.postData.contents || "{}");
@@ -14,9 +17,11 @@ function doPost(e) {
 
 function doGet(e) {
   const callback = sanitizeCallback(e.parameter.callback || "callback");
-  const limit = Math.min(Number(e.parameter.limit || 50), 50);
-  const messages = getLatestMessages(limit);
-  const body = callback + "(" + JSON.stringify({ messages: messages }) + ");";
+  const action = e.parameter.action || "messages";
+  const payload = action === "groups"
+    ? { groups: getGroups() }
+    : { messages: getLatestMessages(Math.min(Number(e.parameter.limit || 50), 50)) };
+  const body = callback + "(" + JSON.stringify(payload) + ");";
 
   return ContentService
     .createTextOutput(body)
@@ -25,6 +30,10 @@ function doGet(e) {
 
 function handleLineWebhook(events) {
   events.forEach(function (event) {
+    if (event.source && event.source.groupId) {
+      upsertGroup(event.source.groupId);
+    }
+
     if (!event.message || event.message.type !== "text") {
       return;
     }
@@ -47,7 +56,7 @@ function handleLineWebhook(events) {
 function handlePagesMessage(data) {
   const props = PropertiesService.getScriptProperties();
   const token = props.getProperty("CHANNEL_ACCESS_TOKEN");
-  const groupId = props.getProperty("GROUP_ID");
+  const groupId = String(data.groupId || props.getProperty("GROUP_ID") || "");
   const text = String(data.text || data.body || "");
 
   appendMessage({
@@ -143,13 +152,83 @@ function getDisplayName(source, userId) {
 
 function getSheet() {
   const sheetId = PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
-  const sheet = SpreadsheetApp.openById(sheetId).getSheets()[0];
+  const spreadsheet = SpreadsheetApp.openById(sheetId);
+  const sheet = spreadsheet.getSheetByName(MESSAGE_SHEET_NAME) || spreadsheet.getSheets()[0];
 
   if (sheet.getLastRow() === 0) {
     sheet.appendRow(SHEET_HEADERS);
   }
 
   return sheet;
+}
+
+function getGroupSheet() {
+  const sheetId = PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
+  const spreadsheet = SpreadsheetApp.openById(sheetId);
+  const sheet = spreadsheet.getSheetByName(GROUP_SHEET_NAME) || spreadsheet.insertSheet(GROUP_SHEET_NAME);
+
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(GROUP_HEADERS);
+  }
+
+  return sheet;
+}
+
+function upsertGroup(groupId) {
+  const sheet = getGroupSheet();
+  const lastRow = sheet.getLastRow();
+  const groupName = getGroupName(groupId);
+  const lastSeenAt = new Date().toISOString();
+
+  if (lastRow > 1) {
+    const values = sheet.getRange(2, 1, lastRow - 1, GROUP_HEADERS.length).getValues();
+    for (let i = 0; i < values.length; i += 1) {
+      if (values[i][0] === groupId) {
+        sheet.getRange(i + 2, 2, 1, 2).setValues([[groupName || values[i][1] || groupId, lastSeenAt]]);
+        return;
+      }
+    }
+  }
+
+  sheet.appendRow([groupId, groupName || groupId, lastSeenAt]);
+}
+
+function getGroups() {
+  const sheet = getGroupSheet();
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    return [];
+  }
+
+  return sheet.getRange(2, 1, lastRow - 1, GROUP_HEADERS.length).getValues()
+    .map(function (row) {
+      return {
+        groupId: row[0],
+        groupName: row[1],
+        lastSeenAt: row[2]
+      };
+    })
+    .sort(function (a, b) {
+      return new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime();
+    });
+}
+
+function getGroupName(groupId) {
+  const token = PropertiesService.getScriptProperties().getProperty("CHANNEL_ACCESS_TOKEN");
+  const response = UrlFetchApp.fetch("https://api.line.me/v2/bot/group/" + groupId + "/summary", {
+    method: "get",
+    headers: {
+      Authorization: "Bearer " + token
+    },
+    muteHttpExceptions: true
+  });
+
+  if (response.getResponseCode() !== 200) {
+    return groupId;
+  }
+
+  const summary = JSON.parse(response.getContentText() || "{}");
+  return summary.groupName || groupId;
 }
 
 function sanitizeCallback(callback) {

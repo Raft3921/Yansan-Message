@@ -337,6 +337,8 @@
       var REFRESH_MS = 12000;
       var SELECTED_GROUP_KEY = "yansanSelectedGroupId";
       var DELETED_GROUPS_KEY = "yansanDeletedGroupIds";
+      var GROUPS_CACHE_KEY = "yansanGroupsCache";
+      var MESSAGES_CACHE_PREFIX = "yansanMessagesCache:";
       var messageForm = document.getElementById("messageForm");
       var messageText = document.getElementById("messageText");
       var groupSelect = document.getElementById("groupSelect");
@@ -362,7 +364,11 @@
         }
       });
 
+      var hasInitialGroup = bootFromCache();
       loadGroups();
+      if (hasInitialGroup) {
+        loadMessages();
+      }
       setInterval(function () {
         if (selectedGroupId) {
           loadMessages();
@@ -473,6 +479,7 @@
 
         loadJsonp({ action: "messages", groupId: selectedGroupId, limit: "50" }, function (data) {
           var rows = normalizeList(data, "messages");
+          saveMessagesCache(selectedGroupId, rows);
           renderMessages(rows);
           showStatus(formatCount(rows.length), "");
         }, function () {
@@ -483,7 +490,8 @@
       function loadGroups() {
         loadJsonp({ action: "groups" }, function (data) {
           var groups = normalizeList(data, "groups");
-          renderGroups(groups);
+          saveCache(GROUPS_CACHE_KEY, groups);
+          renderGroups(groups, false);
         }, function () {
           showStatus("グループ読み込み失敗", "error");
         });
@@ -624,7 +632,7 @@
         messages.appendChild(item);
       }
 
-      function renderGroups(groups) {
+      function renderGroups(groups, skipReload) {
         var currentValue = selectedGroupId || localStorage.getItem(SELECTED_GROUP_KEY) || "";
         var hasCurrent = false;
         var deletedGroupIds = getDeletedGroupIds();
@@ -653,15 +661,64 @@
           messages.innerHTML = '<div class="empty">LINEグループでメッセージを受信すると、ここにグループが表示されます。</div>';
           showStatus("グループなし", "");
         } else {
+          var previousGroupId = selectedGroupId;
           setSelectedGroupId(hasCurrent ? currentValue : visibleGroups[0].groupId);
           groupSelect.value = selectedGroupId;
           updateCurrentGroupName(getSelectedGroupName());
-          latestSignature = "";
-          messages.innerHTML = '<div class="empty">メッセージを読み込んでいます。</div>';
-          loadMessages();
+          if (selectedGroupId !== previousGroupId) {
+            latestSignature = "";
+            if (!skipReload) {
+              renderCachedMessages(selectedGroupId);
+              loadMessages();
+            }
+          }
         }
 
         updateDeleteGroupButton();
+      }
+
+      function bootFromCache() {
+        var cachedGroups = readCache(GROUPS_CACHE_KEY, []);
+        if (cachedGroups.length) {
+          renderGroups(cachedGroups, true);
+        } else if (selectedGroupId) {
+          updateCurrentGroupName("前回のグループ");
+        }
+        if (selectedGroupId) {
+          renderCachedMessages(selectedGroupId);
+          return true;
+        }
+        return false;
+      }
+
+      function renderCachedMessages(groupId) {
+        var cachedMessages = readCache(MESSAGES_CACHE_PREFIX + groupId, []);
+        if (cachedMessages.length) {
+          renderMessages(cachedMessages);
+        } else {
+          messages.innerHTML = '<div class="empty">メッセージを読み込んでいます。</div>';
+        }
+      }
+
+      function saveMessagesCache(groupId, rows) {
+        if (groupId) {
+          saveCache(MESSAGES_CACHE_PREFIX + groupId, rows);
+        }
+      }
+
+      function readCache(key, fallback) {
+        try {
+          var value = localStorage.getItem(key);
+          return value ? JSON.parse(value) : fallback;
+        } catch (error) {
+          return fallback;
+        }
+      }
+
+      function saveCache(key, value) {
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+        } catch (error) {}
       }
 
       function setSelectedGroupId(groupId) {

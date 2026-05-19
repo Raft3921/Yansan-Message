@@ -348,6 +348,7 @@
       var jsonpCounter = 0;
       var latestSignature = "";
       var selectedGroupId = localStorage.getItem(SELECTED_GROUP_KEY) || "";
+      var pendingLocalMessages = [];
 
       messageForm.addEventListener("submit", function (event) {
         event.preventDefault();
@@ -402,6 +403,17 @@
         };
 
         messageText.value = "";
+        var localMessage = {
+          time: new Date().toISOString(),
+          sender: SENDER_NAME,
+          userId: "github-pages",
+          groupId: selectedGroupId,
+          groupName: getSelectedGroupName(),
+          text: body,
+          source: "githubPages"
+        };
+        pendingLocalMessages.push(localMessage);
+        appendLocalMessage(localMessage);
         showStatus("送信しました", "");
 
         void fetch(GAS_URL, {
@@ -536,51 +548,80 @@
       }
 
       function renderMessages(rows) {
-        var signature = JSON.stringify(rows);
+        var displayRows = mergePendingMessages(rows);
+        var signature = JSON.stringify(displayRows);
         if (signature === latestSignature) {
           return;
         }
         latestSignature = signature;
         messages.innerHTML = "";
 
-        if (!rows.length) {
+        if (!displayRows.length) {
           messages.innerHTML = '<div class="empty">まだメッセージはありません。</div>';
           return;
         }
 
-        rows.forEach(function (row) {
-          var senderName = getField(row, ["sender", "senderName", "name", "userName"]) || "不明";
-          var text = getField(row, ["text", "body", "message"]) || "";
-          var timestamp = getField(row, ["time", "timestamp", "datetime", "date"]);
-          var isMine = senderName === SENDER_NAME || getField(row, ["source", "sourceType"]) === "githubPages";
-
-          var item = document.createElement("article");
-          item.className = "message " + (isMine ? "mine" : "other");
-
-          var meta = document.createElement("div");
-          meta.className = "message-meta";
-
-          var name = document.createElement("span");
-          name.textContent = senderName;
-
-          var time = document.createElement("time");
-          time.textContent = formatTime(timestamp);
-          if (timestamp && !Number.isNaN(new Date(timestamp).getTime())) {
-            time.dateTime = new Date(timestamp).toISOString();
-          }
-
-          var bubble = document.createElement("div");
-          bubble.className = "bubble";
-          bubble.textContent = text;
-
-          meta.appendChild(name);
-          meta.appendChild(time);
-          item.appendChild(meta);
-          item.appendChild(bubble);
-          messages.appendChild(item);
-        });
+        displayRows.forEach(appendMessageElement);
 
         scrollToBottom();
+      }
+
+      function mergePendingMessages(rows) {
+        var now = Date.now();
+        pendingLocalMessages = pendingLocalMessages.filter(function (message) {
+          return now - new Date(message.time).getTime() < 60000;
+        }).filter(function (message) {
+          return !rows.some(function (row) {
+            return getField(row, ["text"]) === message.text
+              && getField(row, ["groupId"]) === message.groupId
+              && getField(row, ["sender", "senderName"]) === message.sender;
+          });
+        });
+
+        return rows.concat(pendingLocalMessages.filter(function (message) {
+          return message.groupId === selectedGroupId;
+        }));
+      }
+
+      function appendLocalMessage(row) {
+        if (messages.querySelector(".empty")) {
+          messages.innerHTML = "";
+        }
+        latestSignature = "";
+        appendMessageElement(row);
+        scrollToBottom();
+      }
+
+      function appendMessageElement(row) {
+        var senderName = getField(row, ["sender", "senderName", "name", "userName"]) || "不明";
+        var text = getField(row, ["text", "body", "message"]) || "";
+        var timestamp = getField(row, ["time", "timestamp", "datetime", "date"]);
+        var isMine = senderName === SENDER_NAME || getField(row, ["source", "sourceType"]) === "githubPages";
+
+        var item = document.createElement("article");
+        item.className = "message " + (isMine ? "mine" : "other");
+
+        var meta = document.createElement("div");
+        meta.className = "message-meta";
+
+        var name = document.createElement("span");
+        name.textContent = senderName;
+
+        var time = document.createElement("time");
+        time.textContent = formatTime(timestamp);
+        if (timestamp && !Number.isNaN(new Date(timestamp).getTime())) {
+          time.dateTime = new Date(timestamp).toISOString();
+        }
+
+        var bubble = document.createElement("div");
+        bubble.className = "bubble";
+        bubble.textContent = text;
+
+        meta.appendChild(name);
+        meta.appendChild(time);
+        item.appendChild(meta);
+        item.appendChild(bubble);
+        messages.appendChild(item);
       }
 
       function renderGroups(groups) {

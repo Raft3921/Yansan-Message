@@ -23,6 +23,7 @@
       --button: #0b7a4b;
       --button-dark: #075f3a;
       --danger: #a42d18;
+      --secondary: #2f6f9f;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
@@ -65,7 +66,7 @@
       top: 0;
       z-index: 5;
       display: grid;
-      grid-template-columns: 1fr auto;
+      grid-template-columns: 1fr auto auto;
       gap: 12px;
       align-items: center;
       min-height: 64px;
@@ -109,6 +110,25 @@
       color: #ffe1d9;
     }
 
+    .notify-button {
+      min-height: 40px;
+      border: 0;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.22);
+      color: #fff;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 900;
+      padding: 8px 10px;
+      touch-action: manipulation;
+      white-space: nowrap;
+    }
+
+    .notify-button:disabled {
+      cursor: default;
+      opacity: 0.6;
+    }
+
     .chat {
       min-height: 0;
       overflow-y: auto;
@@ -133,6 +153,20 @@
       color: #273746;
       text-align: center;
       font-weight: 800;
+    }
+
+    .older-toggle {
+      justify-self: center;
+      min-height: 44px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--secondary);
+      color: #fff;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 900;
+      padding: 10px 16px;
+      touch-action: manipulation;
     }
 
     .message {
@@ -297,6 +331,19 @@
         padding-top: 22px;
       }
     }
+
+    @media (max-width: 430px) {
+      .topbar {
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+      }
+
+      .status {
+        grid-column: 1 / -1;
+        min-height: 16px;
+        text-align: left;
+      }
+    }
   </style>
 </head>
 <body>
@@ -306,6 +353,7 @@
         <h1>やんさんチャット</h1>
         <p class="current-group" id="currentGroupName">グループ読み込み中</p>
       </div>
+      <button class="notify-button" id="notifyButton" type="button">通知オン</button>
       <p class="status" id="listStatus" role="status" aria-live="polite">読み込み中</p>
     </header>
 
@@ -337,14 +385,17 @@
       var SENDER_NAME = "やんさん";
       var GAS_URL = "https://script.google.com/macros/s/AKfycbwFI1JIj6WL2I2p1Fto8BBjpv5w4SQAiixaesjsiUIXx-RXoirQM3HOeeJ1FW38RwkA_w/exec";
       var REFRESH_MS = 12000;
+      var RECENT_DAYS = 5;
       var SELECTED_GROUP_KEY = "yansanSelectedGroupId";
       var DELETED_GROUPS_KEY = "yansanDeletedGroupIds";
       var GROUPS_CACHE_KEY = "yansanGroupsCache";
       var MESSAGES_CACHE_PREFIX = "yansanMessagesCache:";
+      var NOTIFICATIONS_KEY = "yansanNotificationsEnabled";
       var messageForm = document.getElementById("messageForm");
       var messageText = document.getElementById("messageText");
       var groupSelect = document.getElementById("groupSelect");
       var deleteGroupButton = document.getElementById("deleteGroupButton");
+      var notifyButton = document.getElementById("notifyButton");
       var currentGroupName = document.getElementById("currentGroupName");
       var listStatus = document.getElementById("listStatus");
       var messages = document.getElementById("messages");
@@ -353,6 +404,11 @@
       var latestSignature = "";
       var selectedGroupId = localStorage.getItem(SELECTED_GROUP_KEY) || "";
       var pendingLocalMessages = [];
+      var showOlderMessages = false;
+      var liveMessageKeysByGroup = {};
+      var liveLoadedGroups = {};
+      var notificationsEnabled = localStorage.getItem(NOTIFICATIONS_KEY) === "1";
+      var serviceWorkerRegistration = null;
 
       messageForm.addEventListener("submit", function (event) {
         event.preventDefault();
@@ -383,6 +439,7 @@
         updateDeleteGroupButton();
         updateCurrentGroupName(getSelectedGroupName());
         latestSignature = "";
+        showOlderMessages = false;
         messages.innerHTML = '<div class="empty">メッセージを読み込んでいます。</div>';
         if (selectedGroupId) {
           loadMessages();
@@ -392,6 +449,10 @@
       deleteGroupButton.addEventListener("click", function () {
         deleteSelectedGroup();
       });
+
+      notifyButton.addEventListener("click", requestNotifications);
+      registerServiceWorker();
+      updateNotificationButton();
 
       function sendMessage() {
         var body = messageText.value.trim();
@@ -421,6 +482,7 @@
           source: "githubPages"
         };
         pendingLocalMessages.push(localMessage);
+        rememberMessageKeys(selectedGroupId, [localMessage]);
         appendLocalMessage(localMessage);
         showStatus("送信しました", "");
 
@@ -465,6 +527,7 @@
         updateDeleteGroupButton();
         updateCurrentGroupName("");
         latestSignature = "";
+        showOlderMessages = false;
         messages.innerHTML = '<div class="empty">メッセージを読み込んでいます。</div>';
         showStatus("グループを削除しました", "");
         window.setTimeout(function () {
@@ -481,6 +544,7 @@
 
         loadJsonp({ action: "messages", groupId: selectedGroupId, limit: "50" }, function (data) {
           var rows = normalizeList(data, "messages");
+          maybeNotifyNewMessages(rows);
           saveMessagesCache(selectedGroupId, rows);
           renderMessages(rows);
           showStatus(formatCount(rows.length), "");
@@ -559,7 +623,9 @@
 
       function renderMessages(rows) {
         var displayRows = mergePendingMessages(rows);
-        var signature = JSON.stringify(displayRows);
+        var splitRows = splitRecentRows(displayRows);
+        var visibleRows = showOlderMessages ? displayRows : splitRows.recent;
+        var signature = JSON.stringify(displayRows) + "|" + (showOlderMessages ? "all" : "recent");
         if (signature === latestSignature) {
           return;
         }
@@ -571,9 +637,57 @@
           return;
         }
 
-        displayRows.forEach(appendMessageElement);
+        if (splitRows.older.length && !showOlderMessages && visibleRows.length) {
+          appendOlderToggle(splitRows.older.length);
+        }
+
+        if (!visibleRows.length) {
+          var empty = document.createElement("div");
+          empty.className = "empty";
+          empty.textContent = "最近5日以内のメッセージはありません。";
+          messages.appendChild(empty);
+          if (splitRows.older.length && !showOlderMessages) {
+            appendOlderToggle(splitRows.older.length);
+          }
+        } else {
+          visibleRows.forEach(appendMessageElement);
+        }
 
         scrollToBottom();
+      }
+
+      function appendOlderToggle(count) {
+        var button = document.createElement("button");
+        button.className = "older-toggle";
+        button.type = "button";
+        button.textContent = "これより前を表示（" + count + "件）";
+        button.addEventListener("click", function () {
+          showOlderMessages = true;
+          latestSignature = "";
+          renderCachedMessages(selectedGroupId);
+        });
+        messages.appendChild(button);
+      }
+
+      function splitRecentRows(rows) {
+        var cutoff = Date.now() - RECENT_DAYS * 24 * 60 * 60 * 1000;
+        var recent = [];
+        var older = [];
+
+        rows.forEach(function (row) {
+          var timestamp = getField(row, ["time", "timestamp", "datetime", "date"]);
+          var time = timestamp ? new Date(timestamp).getTime() : Date.now();
+          if (!Number.isNaN(time) && time < cutoff) {
+            older.push(row);
+          } else {
+            recent.push(row);
+          }
+        });
+
+        return {
+          recent: recent,
+          older: older
+        };
       }
 
       function mergePendingMessages(rows) {
@@ -669,6 +783,7 @@
           updateCurrentGroupName(getSelectedGroupName());
           if (selectedGroupId !== previousGroupId) {
             latestSignature = "";
+            showOlderMessages = false;
             if (!skipReload) {
               renderCachedMessages(selectedGroupId);
               loadMessages();
@@ -732,6 +847,142 @@
         }
       }
 
+      function requestNotifications() {
+        if (!("Notification" in window)) {
+          showStatus("通知に対応していません", "error");
+          updateNotificationButton();
+          return;
+        }
+
+        Notification.requestPermission().then(function (permission) {
+          notificationsEnabled = permission === "granted";
+          if (notificationsEnabled) {
+            localStorage.setItem(NOTIFICATIONS_KEY, "1");
+            showStatus("通知をオンにしました", "");
+          } else {
+            localStorage.removeItem(NOTIFICATIONS_KEY);
+            showStatus("通知が許可されていません", "error");
+          }
+          updateNotificationButton();
+        });
+      }
+
+      function registerServiceWorker() {
+        if (!("serviceWorker" in navigator)) {
+          return;
+        }
+
+        navigator.serviceWorker.register("sw.js").then(function (registration) {
+          serviceWorkerRegistration = registration;
+        }).catch(function () {});
+      }
+
+      function updateNotificationButton() {
+        if (!("Notification" in window)) {
+          notifyButton.hidden = true;
+          return;
+        }
+        if (Notification.permission === "granted" && notificationsEnabled) {
+          notifyButton.textContent = "通知オン";
+          notifyButton.disabled = true;
+        } else if (Notification.permission === "denied") {
+          notifyButton.textContent = "通知不可";
+          notifyButton.disabled = true;
+        } else {
+          notifyButton.textContent = "通知オン";
+          notifyButton.disabled = false;
+        }
+      }
+
+      function maybeNotifyNewMessages(rows) {
+        if (!selectedGroupId) {
+          return;
+        }
+
+        var newRows = [];
+        var knownKeys = liveMessageKeysByGroup[selectedGroupId];
+        if (!liveLoadedGroups[selectedGroupId]) {
+          rememberMessageKeys(selectedGroupId, rows);
+          liveLoadedGroups[selectedGroupId] = true;
+          return;
+        }
+        if (!knownKeys) {
+          knownKeys = {};
+          liveMessageKeysByGroup[selectedGroupId] = knownKeys;
+        }
+
+        rows.forEach(function (row) {
+          var key = getMessageKey(row);
+          if (!knownKeys[key]) {
+            knownKeys[key] = true;
+            if (!isOwnMessage(row)) {
+              newRows.push(row);
+            }
+          }
+        });
+
+        if (newRows.length) {
+          showNewMessageNotification(newRows[newRows.length - 1], newRows.length);
+        }
+      }
+
+      function rememberMessageKeys(groupId, rows) {
+        if (!groupId) {
+          return;
+        }
+        var keys = liveMessageKeysByGroup[groupId] || {};
+        rows.forEach(function (row) {
+          keys[getMessageKey(row)] = true;
+        });
+        liveMessageKeysByGroup[groupId] = keys;
+      }
+
+      function getMessageKey(row) {
+        return [
+          getField(row, ["time", "timestamp", "datetime", "date"]),
+          getField(row, ["sender", "senderName", "name", "userName"]),
+          getField(row, ["groupId"]),
+          getField(row, ["text", "body", "message"])
+        ].join("|");
+      }
+
+      function isOwnMessage(row) {
+        var senderName = getField(row, ["sender", "senderName", "name", "userName"]) || "";
+        return senderName === SENDER_NAME || getField(row, ["source", "sourceType"]) === "githubPages";
+      }
+
+      function showNewMessageNotification(row, count) {
+        if (!notificationsEnabled || !("Notification" in window) || Notification.permission !== "granted") {
+          return;
+        }
+
+        var senderName = getField(row, ["sender", "senderName", "name", "userName"]) || "新着";
+        var text = getField(row, ["text", "body", "message"]) || "";
+        var title = count > 1 ? "新しいメッセージ " + count + "件" : senderName + "から新着";
+        var options = {
+          body: text,
+          icon: "assets/icon-192.png",
+          badge: "assets/icon-192.png",
+          tag: "yansan-chat-" + selectedGroupId,
+          data: {
+            url: "./"
+          }
+        };
+
+        if (serviceWorkerRegistration && serviceWorkerRegistration.showNotification) {
+          serviceWorkerRegistration.showNotification(title, options).catch(function () {});
+          return;
+        }
+
+        try {
+          var notification = new Notification(title, options);
+          notification.onclick = function () {
+            window.focus();
+            notification.close();
+          };
+        } catch (error) {}
+      }
+
       function updateDeleteGroupButton() {
         deleteGroupButton.disabled = !groupSelect.value;
       }
@@ -766,8 +1017,15 @@
       }
 
       function scrollToBottom() {
-        window.requestAnimationFrame(function () {
+        function move() {
           chatLog.scrollTop = chatLog.scrollHeight;
+          window.scrollTo(0, document.documentElement.scrollHeight);
+        }
+        window.requestAnimationFrame(function () {
+          move();
+          window.setTimeout(function () {
+            move();
+          }, 60);
         });
       }
 

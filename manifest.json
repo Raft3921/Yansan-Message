@@ -1,0 +1,23 @@
+{
+  "name": "やんさんチャット",
+  "short_name": "やんチャ",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#8bb4d9",
+  "theme_color": "#6f9cc7",
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

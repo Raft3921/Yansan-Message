@@ -1,7 +1,8 @@
 const MESSAGE_SHEET_NAME = "messages";
 const GROUP_SHEET_NAME = "groups";
 const DELETED_GROUP_SHEET_NAME = "deletedGroups";
-const SHEET_HEADERS = ["time", "sender", "userId", "groupId", "groupName", "text", "source"];
+const IMAGE_FOLDER_PROPERTY = "IMAGE_FOLDER_ID";
+const SHEET_HEADERS = ["time", "sender", "userId", "groupId", "groupName", "text", "source", "messageType", "imageUrl"];
 const LEGACY_SHEET_HEADERS = ["timestamp", "senderName", "userId", "text", "sourceType", "groupId"];
 const GROUP_HEADERS = ["groupId", "groupName", "lastSeenAt"];
 const DELETED_GROUP_HEADERS = ["groupId", "deletedAt"];
@@ -44,7 +45,7 @@ function handleLineWebhook(events) {
       upsertGroup(event.source.groupId);
     }
 
-    if (!event.message || event.message.type !== "text") {
+    if (!event.message || (event.message.type !== "text" && event.message.type !== "image")) {
       return;
     }
 
@@ -54,6 +55,8 @@ function handleLineWebhook(events) {
     const groupName = groupId ? getGroupName(groupId) : "";
     const senderName = getDisplayName(event.source, userId);
     const timestamp = new Date(event.timestamp || Date.now()).toISOString();
+    const messageType = event.message.type;
+    const imageUrl = messageType === "image" ? saveLineImage(event.message) : "";
 
     appendMessage({
       time: timestamp,
@@ -61,8 +64,10 @@ function handleLineWebhook(events) {
       userId: userId,
       groupId: groupId,
       groupName: groupName,
-      text: event.message.text,
-      source: sourceType
+      text: messageType === "text" ? event.message.text : "",
+      source: sourceType,
+      messageType: messageType,
+      imageUrl: imageUrl
     });
   });
 }
@@ -81,7 +86,9 @@ function handlePagesMessage(data) {
     groupId: groupId,
     groupName: groupName,
     text: text,
-    source: "githubPages"
+    source: "githubPages",
+    messageType: "text",
+    imageUrl: ""
   });
 
   UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
@@ -107,7 +114,9 @@ function appendMessage(message) {
     message.groupId,
     message.groupName,
     message.text,
-    message.source
+    message.source,
+    message.messageType || "text",
+    message.imageUrl || ""
   ]);
 }
 
@@ -133,11 +142,57 @@ function getMessages(limit, groupId) {
       groupId: row[3],
       groupName: row[4],
       text: row[5],
-      source: row[6]
+      source: row[6],
+      messageType: row[7] || "text",
+      imageUrl: row[8] || ""
     });
   }
 
   return matched;
+}
+
+function saveLineImage(message) {
+  const provider = message.contentProvider || {};
+  if (provider.type === "external" && provider.originalContentUrl) {
+    return provider.originalContentUrl;
+  }
+
+  const token = PropertiesService.getScriptProperties().getProperty("CHANNEL_ACCESS_TOKEN");
+  const response = UrlFetchApp.fetch(
+    "https://api-data.line.me/v2/bot/message/" + encodeURIComponent(message.id) + "/content/preview",
+    {
+      method: "get",
+      headers: {
+        Authorization: "Bearer " + token
+      },
+      muteHttpExceptions: true
+    }
+  );
+
+  if (response.getResponseCode() !== 200) {
+    return "";
+  }
+
+  const folder = getImageFolder();
+  const contentType = response.getHeaders()["Content-Type"] || "image/jpeg";
+  const extension = contentType.indexOf("png") !== -1 ? ".png" : ".jpg";
+  const file = folder.createFile(response.getBlob().setName("line-preview-" + message.id + extension));
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  const resourceKey = file.getResourceKey();
+  return "https://drive.google.com/uc?export=view&id=" + encodeURIComponent(file.getId())
+    + (resourceKey ? "&resourcekey=" + encodeURIComponent(resourceKey) : "");
+}
+
+function getImageFolder() {
+  const props = PropertiesService.getScriptProperties();
+  const folderId = props.getProperty(IMAGE_FOLDER_PROPERTY);
+  if (folderId) {
+    return DriveApp.getFolderById(folderId);
+  }
+
+  const folder = DriveApp.createFolder("やんさんチャット画像");
+  props.setProperty(IMAGE_FOLDER_PROPERTY, folder.getId());
+  return folder;
 }
 
 function getDisplayName(source, userId) {
@@ -223,7 +278,9 @@ function migrateMessageSheet(sheet) {
       groupId,
       getStoredGroupName(groupId),
       row[3],
-      row[4]
+      row[4],
+      "text",
+      ""
     ];
   });
 

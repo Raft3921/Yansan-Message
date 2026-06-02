@@ -24,6 +24,7 @@
       --button-dark: #075f3a;
       --danger: #a42d18;
       --secondary: #2f6f9f;
+      --unread: #d82f2f;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
@@ -95,6 +96,10 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    .current-group.has-unread {
+      color: #fff8d8;
     }
 
     .status {
@@ -305,6 +310,11 @@
       font-weight: 800;
     }
 
+    select.has-unread {
+      border-color: var(--unread);
+      box-shadow: 0 0 0 3px rgba(216, 47, 47, 0.18);
+    }
+
     .delete-group {
       min-width: 72px;
       min-height: 46px;
@@ -413,6 +423,8 @@
       var GROUPS_CACHE_KEY = "yansanGroupsCache";
       var MESSAGES_CACHE_PREFIX = "yansanMessagesCache:";
       var NOTIFICATIONS_KEY = "yansanNotificationsEnabled";
+      var UNREAD_COUNTS_KEY = "yansanUnreadCounts";
+      var READ_TIMES_KEY = "yansanGroupReadTimes";
       var messageForm = document.getElementById("messageForm");
       var messageText = document.getElementById("messageText");
       var groupSelect = document.getElementById("groupSelect");
@@ -430,6 +442,9 @@
       var liveMessageKeysByGroup = {};
       var liveLoadedGroups = {};
       var notificationsEnabled = localStorage.getItem(NOTIFICATIONS_KEY) === "1";
+      var unreadCounts = readCache(UNREAD_COUNTS_KEY, {});
+      var readTimes = readCache(READ_TIMES_KEY, {});
+      var groupsCache = [];
       var serviceWorkerRegistration = null;
 
       messageForm.addEventListener("submit", function (event) {
@@ -455,9 +470,11 @@
         }
       }, REFRESH_MS);
       setInterval(loadGroups, 60000);
+      updateAppBadge();
 
       groupSelect.addEventListener("change", function () {
         setSelectedGroupId(groupSelect.value);
+        markGroupRead(selectedGroupId);
         updateDeleteGroupButton();
         updateCurrentGroupName(getSelectedGroupName());
         latestSignature = "";
@@ -474,6 +491,8 @@
 
       notifyButton.addEventListener("click", requestNotifications);
       registerServiceWorker();
+      listenForServiceWorkerMessages();
+      selectGroupFromLaunchUrl();
       updateNotificationButton();
 
       function sendMessage() {
@@ -505,6 +524,7 @@
         };
         pendingLocalMessages.push(localMessage);
         rememberMessageKeys(selectedGroupId, [localMessage]);
+        markGroupRead(selectedGroupId);
         appendLocalMessage(localMessage);
         showStatus("送信しました", "");
 
@@ -568,6 +588,7 @@
           var rows = normalizeList(data, "messages");
           maybeNotifyNewMessages(rows);
           saveMessagesCache(selectedGroupId, rows);
+          markGroupRead(selectedGroupId);
           renderMessages(rows);
           showStatus(formatCount(rows.length), "");
         }, function () {
@@ -578,7 +599,9 @@
       function loadGroups() {
         loadJsonp({ action: "groups" }, function (data) {
           var groups = normalizeList(data, "groups");
+          groupsCache = groups;
           saveCache(GROUPS_CACHE_KEY, groups);
+          updateUnreadGroups(groups);
           renderGroups(groups, false);
         }, function () {
           showStatus("グループ読み込み失敗", "error");
@@ -637,7 +660,14 @@
           script.parentNode.removeChild(script);
         }
         try {
-          delete window[callbackName];
+          window[callbackName] = function () {};
+          window.setTimeout(function () {
+            try {
+              delete window[callbackName];
+            } catch (error) {
+              window[callbackName] = undefined;
+            }
+          }, 30000);
         } catch (error) {
           window[callbackName] = undefined;
         }
@@ -805,7 +835,7 @@
         visibleGroups.forEach(function (group) {
           var option = document.createElement("option");
           option.value = group.groupId;
-          option.textContent = group.groupName || group.groupId;
+          option.textContent = formatGroupOptionLabel(group);
           groupSelect.appendChild(option);
           if (group.groupId === currentValue) {
             hasCurrent = true;
@@ -837,11 +867,14 @@
         }
 
         updateDeleteGroupButton();
+        updateUnreadUi();
       }
 
       function bootFromCache() {
         var cachedGroups = readCache(GROUPS_CACHE_KEY, []);
         if (cachedGroups.length) {
+          groupsCache = cachedGroups;
+          updateUnreadGroups(cachedGroups);
           renderGroups(cachedGroups, true);
         } else if (selectedGroupId) {
           updateCurrentGroupName("前回のグループ");
@@ -899,11 +932,14 @@
           return;
         }
 
-        Notification.requestPermission().then(function (permission) {
+        ensureServiceWorkerReady().then(function () {
+          return Notification.requestPermission();
+        }).then(function (permission) {
           notificationsEnabled = permission === "granted";
           if (notificationsEnabled) {
             localStorage.setItem(NOTIFICATIONS_KEY, "1");
             showStatus("通知をオンにしました", "");
+            updateAppBadge();
           } else {
             localStorage.removeItem(NOTIFICATIONS_KEY);
             showStatus("通知が許可されていません", "error");
@@ -919,7 +955,48 @@
 
         navigator.serviceWorker.register("sw.js").then(function (registration) {
           serviceWorkerRegistration = registration;
+          return navigator.serviceWorker.ready;
+        }).then(function (registration) {
+          serviceWorkerRegistration = registration;
         }).catch(function () {});
+      }
+
+      function listenForServiceWorkerMessages() {
+        if (!("serviceWorker" in navigator)) {
+          return;
+        }
+        navigator.serviceWorker.addEventListener("message", function (event) {
+          var groupId = event.data && event.data.groupId;
+          if (groupId) {
+            openGroup(groupId);
+          }
+        });
+      }
+
+      function selectGroupFromLaunchUrl() {
+        var params = new URLSearchParams(window.location.search);
+        var groupId = params.get("groupId");
+        if (groupId) {
+          openGroup(groupId);
+        }
+      }
+
+      function ensureServiceWorkerReady() {
+        if (!("serviceWorker" in navigator)) {
+          return Promise.resolve(null);
+        }
+        if (serviceWorkerRegistration) {
+          return navigator.serviceWorker.ready.then(function (registration) {
+            serviceWorkerRegistration = registration;
+            return registration;
+          });
+        }
+        return navigator.serviceWorker.register("sw.js").then(function () {
+          return navigator.serviceWorker.ready;
+        }).then(function (registration) {
+          serviceWorkerRegistration = registration;
+          return registration;
+        });
       }
 
       function updateNotificationButton() {
@@ -967,8 +1044,117 @@
         });
 
         if (newRows.length) {
+          incrementUnread(selectedGroupId, newRows.length);
           showNewMessageNotification(newRows[newRows.length - 1], newRows.length);
         }
+      }
+
+      function updateUnreadGroups(groups) {
+        var deletedGroupIds = getDeletedGroupIds();
+        groups.forEach(function (group) {
+          if (!group.groupId || deletedGroupIds.indexOf(group.groupId) !== -1) {
+            return;
+          }
+          if (group.groupId === selectedGroupId) {
+            return;
+          }
+          var lastSeenTime = parseTime(group.lastSeenAt);
+          var readTime = readTimes[group.groupId] || 0;
+          if (lastSeenTime && lastSeenTime > readTime) {
+            fetchGroupNewMessages(group.groupId, group.groupName || group.groupId);
+          }
+        });
+      }
+
+      function fetchGroupNewMessages(groupId, groupName) {
+        loadJsonp({ action: "messages", groupId: groupId, limit: "10" }, function (data) {
+          var rows = normalizeList(data, "messages");
+          var newRows = collectNewRows(groupId, rows);
+          if (!newRows.length) {
+            return;
+          }
+          saveMessagesCache(groupId, rows);
+          incrementUnread(groupId, newRows.length);
+          showNewMessageNotification(newRows[newRows.length - 1], newRows.length, groupId, groupName);
+          renderGroups(groupsCache, true);
+        }, function () {});
+      }
+
+      function collectNewRows(groupId, rows) {
+        var newRows = [];
+        var knownKeys = liveMessageKeysByGroup[groupId];
+        if (!liveLoadedGroups[groupId]) {
+          rememberMessageKeys(groupId, rows);
+          liveLoadedGroups[groupId] = true;
+          return [];
+        }
+        if (!knownKeys) {
+          knownKeys = {};
+          liveMessageKeysByGroup[groupId] = knownKeys;
+        }
+        rows.forEach(function (row) {
+          var key = getMessageKey(row);
+          if (!knownKeys[key]) {
+            knownKeys[key] = true;
+            if (!isOwnMessage(row)) {
+              newRows.push(row);
+            }
+          }
+        });
+        return newRows;
+      }
+
+      function incrementUnread(groupId, count) {
+        if (!groupId || groupId === selectedGroupId) {
+          return;
+        }
+        unreadCounts[groupId] = Math.min((Number(unreadCounts[groupId]) || 0) + count, 99);
+        saveCache(UNREAD_COUNTS_KEY, unreadCounts);
+        updateUnreadUi();
+        updateAppBadge();
+      }
+
+      function markGroupRead(groupId) {
+        if (!groupId) {
+          return;
+        }
+        unreadCounts[groupId] = 0;
+        readTimes[groupId] = Date.now();
+        saveCache(UNREAD_COUNTS_KEY, unreadCounts);
+        saveCache(READ_TIMES_KEY, readTimes);
+        updateUnreadUi();
+        updateAppBadge();
+      }
+
+      function updateUnreadUi() {
+        var total = getTotalUnread();
+        groupSelect.className = total ? "has-unread" : "";
+        if (currentGroupName) {
+          currentGroupName.className = "current-group" + (total ? " has-unread" : "");
+        }
+      }
+
+      function updateAppBadge() {
+        var total = getTotalUnread();
+        if ("setAppBadge" in navigator) {
+          if (total > 0) {
+            navigator.setAppBadge(total).catch(function () {});
+          } else if ("clearAppBadge" in navigator) {
+            navigator.clearAppBadge().catch(function () {});
+          }
+        }
+      }
+
+      function getTotalUnread() {
+        return Object.keys(unreadCounts).reduce(function (total, groupId) {
+          return total + (Number(unreadCounts[groupId]) || 0);
+        }, 0);
+      }
+
+      function formatGroupOptionLabel(group) {
+        var name = group.groupName || group.groupId;
+        var unread = Number(unreadCounts[group.groupId]) || 0;
+        return unread ? "● " + name + "（" + unread + "）" : name;
       }
 
       function rememberMessageKeys(groupId, rows) {
@@ -998,7 +1184,7 @@
         return senderName === SENDER_NAME || getField(row, ["source", "sourceType"]) === "githubPages";
       }
 
-      function showNewMessageNotification(row, count) {
+      function showNewMessageNotification(row, count, groupId, groupName) {
         if (!notificationsEnabled || !("Notification" in window) || Notification.permission !== "granted") {
           return;
         }
@@ -1006,19 +1192,26 @@
         var senderName = getField(row, ["sender", "senderName", "name", "userName"]) || "新着";
         var text = getField(row, ["text", "body", "message"])
           || (getField(row, ["messageType", "type"]) === "image" ? "写真が届きました" : "");
-        var title = count > 1 ? "新しいメッセージ " + count + "件" : senderName + "から新着";
+        var titlePrefix = groupName ? groupName + " / " : "";
+        var title = count > 1 ? titlePrefix + "新しいメッセージ " + count + "件" : titlePrefix + senderName + "から新着";
         var options = {
           body: text,
           icon: "assets/icon-192.png",
           badge: "assets/icon-192.png",
-          tag: "yansan-chat-" + selectedGroupId,
+          tag: "yansan-chat-" + (groupId || selectedGroupId),
+          renotify: true,
           data: {
-            url: "./"
+            url: "./?groupId=" + encodeURIComponent(groupId || selectedGroupId),
+            groupId: groupId || selectedGroupId
           }
         };
 
-        if (serviceWorkerRegistration && serviceWorkerRegistration.showNotification) {
-          serviceWorkerRegistration.showNotification(title, options).catch(function () {});
+        if ("serviceWorker" in navigator) {
+          ensureServiceWorkerReady().then(function (registration) {
+            if (registration && registration.showNotification) {
+              registration.showNotification(title, options).catch(function () {});
+            }
+          }).catch(function () {});
           return;
         }
 
@@ -1035,6 +1228,18 @@
         deleteGroupButton.disabled = !groupSelect.value;
       }
 
+      function openGroup(groupId) {
+        setSelectedGroupId(groupId);
+        groupSelect.value = groupId;
+        markGroupRead(groupId);
+        updateDeleteGroupButton();
+        updateCurrentGroupName(getSelectedGroupName());
+        latestSignature = "";
+        showOlderMessages = false;
+        renderCachedMessages(groupId);
+        loadMessages();
+      }
+
       function updateCurrentGroupName(name) {
         currentGroupName.textContent = name || "グループ未選択";
       }
@@ -1043,7 +1248,17 @@
         if (!groupSelect.value || groupSelect.selectedIndex < 0) {
           return "";
         }
-        return groupSelect.options[groupSelect.selectedIndex].textContent;
+        var group = findGroupById(groupSelect.value);
+        return group ? group.groupName || group.groupId : groupSelect.options[groupSelect.selectedIndex].textContent;
+      }
+
+      function findGroupById(groupId) {
+        for (var i = 0; i < groupsCache.length; i += 1) {
+          if (groupsCache[i].groupId === groupId) {
+            return groupsCache[i];
+          }
+        }
+        return null;
       }
 
       function getDeletedGroupIds() {
@@ -1062,6 +1277,11 @@
           ids.push(groupId);
           localStorage.setItem(DELETED_GROUPS_KEY, JSON.stringify(ids));
         }
+      }
+
+      function parseTime(value) {
+        var time = value ? new Date(value).getTime() : 0;
+        return Number.isNaN(time) ? 0 : time;
       }
 
       function scrollToBottom() {

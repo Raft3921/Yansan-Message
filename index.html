@@ -248,6 +248,32 @@
       line-height: 1.4;
     }
 
+    .sticker-bubble {
+      display: grid;
+      gap: 4px;
+      min-width: 148px;
+      background: #fff6c7;
+      color: #273746;
+    }
+
+    .sticker-mark {
+      font-size: 34px;
+      line-height: 1;
+    }
+
+    .sticker-title {
+      font-size: 16px;
+      font-weight: 900;
+      line-height: 1.25;
+    }
+
+    .sticker-detail {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.25;
+    }
+
     .composer {
       position: sticky;
       bottom: 0;
@@ -773,6 +799,8 @@
         var text = getField(row, ["text", "body", "message"]) || "";
         var messageType = getField(row, ["messageType", "type"]) || "text";
         var imageUrl = getField(row, ["imageUrl", "image", "mediaUrl"]) || "";
+        var stickerPackageId = getField(row, ["stickerPackageId", "packageId"]) || "";
+        var stickerId = getField(row, ["stickerId"]) || "";
         var timestamp = getField(row, ["time", "timestamp", "datetime", "date"]);
         var isMine = senderName === SENDER_NAME || getField(row, ["source", "sourceType"]) === "githubPages";
 
@@ -812,6 +840,25 @@
         } else if (messageType === "image") {
           bubble.className += " image-missing";
           bubble.textContent = "写真を表示できません";
+        } else if (messageType === "sticker") {
+          bubble.className += " sticker-bubble";
+          var mark = document.createElement("div");
+          mark.className = "sticker-mark";
+          mark.textContent = "STAMP";
+
+          var title = document.createElement("div");
+          title.className = "sticker-title";
+          title.textContent = text || "スタンプが届きました";
+
+          var detail = document.createElement("div");
+          detail.className = "sticker-detail";
+          detail.textContent = formatStickerDetail(stickerPackageId, stickerId);
+
+          bubble.appendChild(mark);
+          bubble.appendChild(title);
+          if (detail.textContent) {
+            bubble.appendChild(detail);
+          }
         } else {
           bubble.textContent = text;
         }
@@ -1157,6 +1204,28 @@
         return unread ? "● " + name + "（" + unread + "）" : name;
       }
 
+      function getNotificationBody(row) {
+        var messageType = getField(row, ["messageType", "type"]);
+        if (messageType === "image") {
+          return "写真が届きました";
+        }
+        if (messageType === "sticker") {
+          return "スタンプが届きました";
+        }
+        return "";
+      }
+
+      function formatStickerDetail(packageId, stickerId) {
+        var parts = [];
+        if (packageId) {
+          parts.push("package " + packageId);
+        }
+        if (stickerId) {
+          parts.push("sticker " + stickerId);
+        }
+        return parts.join(" / ");
+      }
+
       function rememberMessageKeys(groupId, rows) {
         if (!groupId) {
           return;
@@ -1175,7 +1244,9 @@
           getField(row, ["groupId"]),
           getField(row, ["text", "body", "message"]),
           getField(row, ["messageType", "type"]),
-          getField(row, ["imageUrl", "image", "mediaUrl"])
+          getField(row, ["imageUrl", "image", "mediaUrl"]),
+          getField(row, ["stickerPackageId", "packageId"]),
+          getField(row, ["stickerId"])
         ].join("|");
       }
 
@@ -1191,7 +1262,7 @@
 
         var senderName = getField(row, ["sender", "senderName", "name", "userName"]) || "新着";
         var text = getField(row, ["text", "body", "message"])
-          || (getField(row, ["messageType", "type"]) === "image" ? "写真が届きました" : "");
+          || getNotificationBody(row);
         var titlePrefix = groupName ? groupName + " / " : "";
         var title = count > 1 ? titlePrefix + "新しいメッセージ " + count + "件" : titlePrefix + senderName + "から新着";
         var options = {

@@ -2,7 +2,7 @@ const MESSAGE_SHEET_NAME = "messages";
 const GROUP_SHEET_NAME = "groups";
 const DELETED_GROUP_SHEET_NAME = "deletedGroups";
 const IMAGE_FOLDER_PROPERTY = "IMAGE_FOLDER_ID";
-const SHEET_HEADERS = ["time", "sender", "userId", "groupId", "groupName", "text", "source", "messageType", "imageUrl"];
+const SHEET_HEADERS = ["time", "sender", "userId", "groupId", "groupName", "text", "source", "messageType", "imageUrl", "stickerPackageId", "stickerId", "stickerResourceType"];
 const LEGACY_SHEET_HEADERS = ["timestamp", "senderName", "userId", "text", "sourceType", "groupId"];
 const GROUP_HEADERS = ["groupId", "groupName", "lastSeenAt"];
 const DELETED_GROUP_HEADERS = ["groupId", "deletedAt"];
@@ -45,7 +45,7 @@ function handleLineWebhook(events) {
       upsertGroup(event.source.groupId);
     }
 
-    if (!event.message || (event.message.type !== "text" && event.message.type !== "image")) {
+    if (!event.message || ["text", "image", "sticker"].indexOf(event.message.type) === -1) {
       return;
     }
 
@@ -57,6 +57,9 @@ function handleLineWebhook(events) {
     const timestamp = new Date(event.timestamp || Date.now()).toISOString();
     const messageType = event.message.type;
     const imageUrl = messageType === "image" ? saveLineImage(event.message) : "";
+    const stickerPackageId = messageType === "sticker" ? String(event.message.packageId || "") : "";
+    const stickerId = messageType === "sticker" ? String(event.message.stickerId || "") : "";
+    const stickerResourceType = messageType === "sticker" ? String(event.message.stickerResourceType || "") : "";
 
     appendMessage({
       time: timestamp,
@@ -64,10 +67,13 @@ function handleLineWebhook(events) {
       userId: userId,
       groupId: groupId,
       groupName: groupName,
-      text: messageType === "text" ? event.message.text : "",
+      text: getMessageText(event.message),
       source: sourceType,
       messageType: messageType,
-      imageUrl: imageUrl
+      imageUrl: imageUrl,
+      stickerPackageId: stickerPackageId,
+      stickerId: stickerId,
+      stickerResourceType: stickerResourceType
     });
   });
 }
@@ -88,7 +94,10 @@ function handlePagesMessage(data) {
     text: text,
     source: "githubPages",
     messageType: "text",
-    imageUrl: ""
+    imageUrl: "",
+    stickerPackageId: "",
+    stickerId: "",
+    stickerResourceType: ""
   });
 
   UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
@@ -116,7 +125,10 @@ function appendMessage(message) {
     message.text,
     message.source,
     message.messageType || "text",
-    message.imageUrl || ""
+    message.imageUrl || "",
+    message.stickerPackageId || "",
+    message.stickerId || "",
+    message.stickerResourceType || ""
   ]);
 }
 
@@ -144,11 +156,27 @@ function getMessages(limit, groupId) {
       text: row[5],
       source: row[6],
       messageType: row[7] || "text",
-      imageUrl: row[8] || ""
+      imageUrl: row[8] || "",
+      stickerPackageId: row[9] || "",
+      stickerId: row[10] || "",
+      stickerResourceType: row[11] || ""
     });
   }
 
   return matched;
+}
+
+function getMessageText(message) {
+  if (message.type === "text") {
+    return message.text || "";
+  }
+  if (message.type === "image") {
+    return "写真が届きました";
+  }
+  if (message.type === "sticker") {
+    return "スタンプが届きました";
+  }
+  return "";
 }
 
 function saveLineImage(message) {
@@ -159,7 +187,7 @@ function saveLineImage(message) {
 
   const token = PropertiesService.getScriptProperties().getProperty("CHANNEL_ACCESS_TOKEN");
   const response = UrlFetchApp.fetch(
-    "https://api-data.line.me/v2/bot/message/" + encodeURIComponent(message.id) + "/content/preview",
+    "https://api-data.line.me/v2/bot/message/" + encodeURIComponent(message.id) + "/content",
     {
       method: "get",
       headers: {
@@ -174,13 +202,24 @@ function saveLineImage(message) {
   }
 
   const folder = getImageFolder();
-  const contentType = response.getHeaders()["Content-Type"] || "image/jpeg";
+  const contentType = getHeaderValue(response.getHeaders(), "Content-Type") || "image/jpeg";
   const extension = contentType.indexOf("png") !== -1 ? ".png" : ".jpg";
-  const file = folder.createFile(response.getBlob().setName("line-preview-" + message.id + extension));
+  const file = folder.createFile(response.getBlob().setName("line-image-" + message.id + extension));
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
   const resourceKey = file.getResourceKey();
   return "https://drive.google.com/uc?export=view&id=" + encodeURIComponent(file.getId())
     + (resourceKey ? "&resourcekey=" + encodeURIComponent(resourceKey) : "");
+}
+
+function getHeaderValue(headers, name) {
+  const lowerName = name.toLowerCase();
+  const keys = Object.keys(headers || {});
+  for (let i = 0; i < keys.length; i += 1) {
+    if (String(keys[i]).toLowerCase() === lowerName) {
+      return headers[keys[i]];
+    }
+  }
+  return "";
 }
 
 function getImageFolder() {
@@ -280,6 +319,9 @@ function migrateMessageSheet(sheet) {
       row[3],
       row[4],
       "text",
+      "",
+      "",
+      "",
       ""
     ];
   });

@@ -483,6 +483,7 @@
       var unreadCounts = readCache(UNREAD_COUNTS_KEY, {});
       var readTimes = readCache(READ_TIMES_KEY, {});
       var groupsCache = [];
+      var imageDataUrlCache = {};
       var serviceWorkerRegistration = null;
 
       messageForm.addEventListener("submit", function (event) {
@@ -646,7 +647,7 @@
         });
       }
 
-      function loadJsonp(params, onSuccess, onError) {
+      function loadJsonp(params, onSuccess, onError, timeoutMs) {
         var callbackName = "__yansanMessages" + Date.now() + "_" + jsonpCounter;
         jsonpCounter += 1;
 
@@ -662,7 +663,7 @@
         script.dataset.jsonpTimer = String(window.setTimeout(function () {
           cleanupJsonp(callbackName);
           onError();
-        }, 8000));
+        }, timeoutMs || 8000));
         script.onerror = function () {
           cleanupJsonp(callbackName);
           onError();
@@ -848,11 +849,15 @@
           image.loading = "lazy";
           image.decoding = "async";
           image.addEventListener("error", function () {
+            if (loadImageDataUrl(imageUrl, image)) {
+              return;
+            }
             var fallbackUrl = getDriveDownloadUrl(imageUrl);
             if (fallbackUrl && image.src !== fallbackUrl) {
               image.src = fallbackUrl;
             }
           });
+          loadImageDataUrl(imageUrl, image);
 
           link.appendChild(image);
           bubble.appendChild(link);
@@ -1279,6 +1284,38 @@
         if (lastIndex < value.length) {
           container.appendChild(document.createTextNode(value.slice(lastIndex)));
         }
+      }
+
+      function loadImageDataUrl(imageUrl, image) {
+        if (!imageUrl || image.dataset.imageDataRequested === "1") {
+          return false;
+        }
+
+        if (imageDataUrlCache[imageUrl]) {
+          image.src = imageDataUrlCache[imageUrl];
+          return true;
+        }
+
+        if (!shouldProxyImageUrl(imageUrl)) {
+          return false;
+        }
+
+        image.dataset.imageDataRequested = "1";
+        loadJsonp({
+          action: "imageData",
+          imageUrl: imageUrl
+        }, function (data) {
+          if (data && data.ok && data.imageDataUrl) {
+            imageDataUrlCache[imageUrl] = data.imageDataUrl;
+            image.src = data.imageDataUrl;
+          }
+        }, function () {}, 20000);
+        return true;
+      }
+
+      function shouldProxyImageUrl(url) {
+        var driveId = getDriveFileId(url);
+        return Boolean(driveId);
       }
 
       function getDisplayImageUrl(url) {

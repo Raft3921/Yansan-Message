@@ -29,14 +29,24 @@ function doGet(e) {
   const action = e.parameter.action || "messages";
   const defaultGroupId = PropertiesService.getScriptProperties().getProperty("GROUP_ID") || "";
   const groupId = String(e.parameter.groupId || defaultGroupId);
-  const payload = action === "groups"
-    ? { groups: getGroups() }
-    : { messages: getMessages(Math.min(Number(e.parameter.limit || 50), 50), groupId) };
+  const payload = getPayload(action, e.parameter, groupId);
   const body = callback + "(" + JSON.stringify(payload) + ");";
 
   return ContentService
     .createTextOutput(body)
     .setMimeType(ContentService.MimeType.JAVASCRIPT);
+}
+
+function getPayload(action, parameter, groupId) {
+  if (action === "groups") {
+    return { groups: getGroups() };
+  }
+
+  if (action === "imageData") {
+    return getImageDataPayload(String(parameter.imageUrl || ""));
+  }
+
+  return { messages: getMessages(Math.min(Number(parameter.limit || 50), 50), groupId) };
 }
 
 function handleLineWebhook(events) {
@@ -213,6 +223,52 @@ function getDriveImageUrl(file) {
   const resourceKey = file.getResourceKey();
   return "https://drive.google.com/thumbnail?sz=w1200&id=" + encodeURIComponent(file.getId())
     + (resourceKey ? "&resourcekey=" + encodeURIComponent(resourceKey) : "");
+}
+
+function getImageDataPayload(imageUrl) {
+  const dataUrl = getImageDataUrl(imageUrl);
+  return {
+    ok: Boolean(dataUrl),
+    imageUrl: imageUrl,
+    imageDataUrl: dataUrl
+  };
+}
+
+function getImageDataUrl(imageUrl) {
+  try {
+    const driveFileId = getDriveFileIdFromUrl(imageUrl);
+    if (driveFileId) {
+      const file = DriveApp.getFileById(driveFileId);
+      const blob = file.getBlob();
+      return blobToDataUrl(blob);
+    }
+
+    if (/^https?:\/\//i.test(imageUrl)) {
+      const response = UrlFetchApp.fetch(imageUrl, { muteHttpExceptions: true });
+      if (response.getResponseCode() >= 200 && response.getResponseCode() < 300) {
+        return blobToDataUrl(response.getBlob());
+      }
+    }
+  } catch (error) {
+    return "";
+  }
+
+  return "";
+}
+
+function blobToDataUrl(blob) {
+  const contentType = blob.getContentType() || "image/jpeg";
+  return "data:" + contentType + ";base64," + Utilities.base64Encode(blob.getBytes());
+}
+
+function getDriveFileIdFromUrl(url) {
+  const idMatch = String(url || "").match(/[?&]id=([^&]+)/);
+  if (idMatch) {
+    return decodeURIComponent(idMatch[1]);
+  }
+
+  const pathMatch = String(url || "").match(/\/file\/d\/([^/]+)/);
+  return pathMatch ? decodeURIComponent(pathMatch[1]) : "";
 }
 
 function getHeaderValue(headers, name) {

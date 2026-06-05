@@ -206,8 +206,12 @@ function saveLineImage(message) {
   const extension = contentType.indexOf("png") !== -1 ? ".png" : ".jpg";
   const file = folder.createFile(response.getBlob().setName("line-image-" + message.id + extension));
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return getDriveImageUrl(file);
+}
+
+function getDriveImageUrl(file) {
   const resourceKey = file.getResourceKey();
-  return "https://drive.google.com/uc?export=view&id=" + encodeURIComponent(file.getId())
+  return "https://drive.google.com/thumbnail?sz=w1200&id=" + encodeURIComponent(file.getId())
     + (resourceKey ? "&resourcekey=" + encodeURIComponent(resourceKey) : "");
 }
 

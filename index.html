@@ -215,6 +215,18 @@
       line-height: 1.55;
     }
 
+    .bubble a {
+      color: #0757b8;
+      font-weight: 800;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      overflow-wrap: anywhere;
+    }
+
+    .message.mine .bubble a {
+      color: #064a9a;
+    }
+
     .message.other .bubble {
       background: var(--other);
       border-top-left-radius: 3px;
@@ -799,6 +811,7 @@
         var text = getField(row, ["text", "body", "message"]) || "";
         var messageType = getField(row, ["messageType", "type"]) || "text";
         var imageUrl = getField(row, ["imageUrl", "image", "mediaUrl"]) || "";
+        var displayImageUrl = getDisplayImageUrl(imageUrl);
         var stickerPackageId = getField(row, ["stickerPackageId", "packageId"]) || "";
         var stickerId = getField(row, ["stickerId"]) || "";
         var timestamp = getField(row, ["time", "timestamp", "datetime", "date"]);
@@ -830,10 +843,16 @@
 
           var image = document.createElement("img");
           image.className = "message-image";
-          image.src = imageUrl;
+          image.src = displayImageUrl;
           image.alt = senderName + "の写真";
           image.loading = "lazy";
           image.decoding = "async";
+          image.addEventListener("error", function () {
+            var fallbackUrl = getDriveDownloadUrl(imageUrl);
+            if (fallbackUrl && image.src !== fallbackUrl) {
+              image.src = fallbackUrl;
+            }
+          });
 
           link.appendChild(image);
           bubble.appendChild(link);
@@ -860,7 +879,7 @@
             bubble.appendChild(detail);
           }
         } else {
-          bubble.textContent = text;
+          appendLinkedText(bubble, text);
         }
 
         meta.appendChild(name);
@@ -1224,6 +1243,85 @@
           parts.push("sticker " + stickerId);
         }
         return parts.join(" / ");
+      }
+
+      function appendLinkedText(container, text) {
+        var value = String(text || "");
+        var urlPattern = /((?:https?:\/\/|www\.)[^\s<>"']+)/gi;
+        var lastIndex = 0;
+        var match;
+
+        while ((match = urlPattern.exec(value)) !== null) {
+          var rawUrl = match[0];
+          var cleanUrl = rawUrl.replace(/[.,!?;:、。！？)）\]}」』]+$/g, "");
+          var trailingText = rawUrl.slice(cleanUrl.length);
+
+          if (match.index > lastIndex) {
+            container.appendChild(document.createTextNode(value.slice(lastIndex, match.index)));
+          }
+
+          if (cleanUrl) {
+            var link = document.createElement("a");
+            link.href = /^https?:\/\//i.test(cleanUrl) ? cleanUrl : "https://" + cleanUrl;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = cleanUrl;
+            container.appendChild(link);
+          }
+
+          if (trailingText) {
+            container.appendChild(document.createTextNode(trailingText));
+          }
+
+          lastIndex = match.index + rawUrl.length;
+        }
+
+        if (lastIndex < value.length) {
+          container.appendChild(document.createTextNode(value.slice(lastIndex)));
+        }
+      }
+
+      function getDisplayImageUrl(url) {
+        var driveId = getDriveFileId(url);
+        if (!driveId) {
+          return url;
+        }
+        return "https://drive.google.com/thumbnail?sz=w1200&id=" + encodeURIComponent(driveId) + getDriveResourceKeyQuery(url);
+      }
+
+      function getDriveDownloadUrl(url) {
+        var driveId = getDriveFileId(url);
+        if (!driveId) {
+          return "";
+        }
+        return "https://drive.google.com/uc?export=download&id=" + encodeURIComponent(driveId) + getDriveResourceKeyQuery(url);
+      }
+
+      function getDriveFileId(url) {
+        try {
+          var parsed = new URL(url, window.location.href);
+          if (parsed.hostname !== "drive.google.com" && parsed.hostname !== "www.drive.google.com") {
+            return "";
+          }
+          var id = parsed.searchParams.get("id");
+          if (id) {
+            return id;
+          }
+          var match = parsed.pathname.match(/\/file\/d\/([^/]+)/);
+          return match ? match[1] : "";
+        } catch (error) {
+          return "";
+        }
+      }
+
+      function getDriveResourceKeyQuery(url) {
+        try {
+          var parsed = new URL(url, window.location.href);
+          var resourceKey = parsed.searchParams.get("resourcekey");
+          return resourceKey ? "&resourcekey=" + encodeURIComponent(resourceKey) : "";
+        } catch (error) {
+          return "";
+        }
       }
 
       function rememberMessageKeys(groupId, rows) {

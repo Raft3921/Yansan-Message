@@ -466,6 +466,7 @@
       var messageForm = document.getElementById("messageForm");
       var messageText = document.getElementById("messageText");
       var groupSelect = document.getElementById("groupSelect");
+      var sendButton = document.getElementById("sendButton");
       var deleteGroupButton = document.getElementById("deleteGroupButton");
       var notifyButton = document.getElementById("notifyButton");
       var currentGroupName = document.getElementById("currentGroupName");
@@ -545,12 +546,18 @@
           return;
         }
 
+        if (sendButton.disabled) {
+          return;
+        }
+
         var payload = {
           text: body,
           sender: SENDER_NAME,
           groupId: selectedGroupId
         };
 
+        sendButton.disabled = true;
+        sendButton.textContent = "送信中";
         messageText.value = "";
         var localMessage = {
           time: new Date().toISOString(),
@@ -565,18 +572,35 @@
         rememberMessageKeys(selectedGroupId, [localMessage]);
         markGroupRead(selectedGroupId);
         appendLocalMessage(localMessage);
-        showStatus("送信しました", "");
+        showStatus("送信中", "");
 
-        void fetch(GAS_URL, {
-          method: "POST",
-          mode: "no-cors",
-          headers: {
-            "Content-Type": "text/plain;charset=utf-8"
-          },
-          body: JSON.stringify(payload)
-        });
-
-        window.setTimeout(loadMessages, 900);
+        loadJsonp({
+          action: "sendMessage",
+          groupId: payload.groupId,
+          sender: payload.sender,
+          text: payload.text
+        }, function (data) {
+          sendButton.disabled = false;
+          sendButton.textContent = "送信";
+          if (data && data.ok) {
+            showStatus("送信しました", "");
+            window.setTimeout(loadMessages, 900);
+            return;
+          }
+          showStatus("送信失敗（LINE " + (data && data.lineStatus ? data.lineStatus : "エラー") + "）", "error");
+          messageText.value = body;
+          messageText.focus();
+          removePendingLocalMessage(localMessage);
+          loadMessages();
+        }, function () {
+          sendButton.disabled = false;
+          sendButton.textContent = "送信";
+          showStatus("送信失敗", "error");
+          messageText.value = body;
+          messageText.focus();
+          removePendingLocalMessage(localMessage);
+          loadMessages();
+        }, 15000);
       }
 
       function deleteSelectedGroup() {
@@ -805,6 +829,13 @@
         latestSignature = "";
         appendMessageElement(row);
         scrollToBottom();
+      }
+
+      function removePendingLocalMessage(row) {
+        pendingLocalMessages = pendingLocalMessages.filter(function (message) {
+          return message !== row;
+        });
+        latestSignature = "";
       }
 
       function appendMessageElement(row) {

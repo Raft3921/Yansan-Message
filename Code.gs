@@ -42,6 +42,14 @@ function getPayload(action, parameter, groupId) {
     return { groups: getGroups() };
   }
 
+  if (action === "sendMessage") {
+    return handlePagesMessage({
+      text: parameter.text,
+      sender: parameter.sender,
+      groupId: parameter.groupId || groupId
+    });
+  }
+
   if (action === "imageData") {
     return getImageDataPayload(String(parameter.imageUrl || ""));
   }
@@ -95,6 +103,13 @@ function handlePagesMessage(data) {
   const groupName = getStoredGroupName(groupId);
   const text = String(data.text || data.body || "");
 
+  if (!groupId || !text) {
+    return {
+      ok: false,
+      error: "missing_fields"
+    };
+  }
+
   appendMessage({
     time: new Date().toISOString(),
     sender: String(data.senderName || data.sender || "やんさん"),
@@ -110,7 +125,7 @@ function handlePagesMessage(data) {
     stickerResourceType: ""
   });
 
-  UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
+  const response = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
     method: "post",
     headers: {
       Authorization: "Bearer " + token,
@@ -122,6 +137,11 @@ function handlePagesMessage(data) {
     }),
     muteHttpExceptions: true
   });
+
+  return {
+    ok: response.getResponseCode() >= 200 && response.getResponseCode() < 300,
+    lineStatus: response.getResponseCode()
+  };
 }
 
 function appendMessage(message) {

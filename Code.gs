@@ -2,6 +2,7 @@ const MESSAGE_SHEET_NAME = "messages";
 const GROUP_SHEET_NAME = "groups";
 const DELETED_GROUP_SHEET_NAME = "deletedGroups";
 const IMAGE_FOLDER_PROPERTY = "IMAGE_FOLDER_ID";
+const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxHgZvRVxKg3auAV0avb2JJhVGXqUq7S21_R46Dy9R5IhoK4n1YJ6ewVVJB34ViZSs3/exec";
 const SHEET_HEADERS = ["time", "sender", "userId", "groupId", "groupName", "text", "source", "messageType", "imageUrl", "stickerPackageId", "stickerId", "stickerResourceType"];
 const LEGACY_SHEET_HEADERS = ["timestamp", "senderName", "userId", "text", "sourceType", "groupId"];
 const GROUP_HEADERS = ["groupId", "groupName", "lastSeenAt"];
@@ -764,6 +765,44 @@ function testLineToken() {
     .getProperty("CHANNEL_ACCESS_TOKEN");
 
   const response = UrlFetchApp.fetch("https://api.line.me/v2/bot/info", {
+    method: "get",
+    headers: {
+      Authorization: "Bearer " + token
+    },
+    muteHttpExceptions: true
+  });
+
+  console.log(response.getResponseCode());
+  console.log(response.getContentText());
+}
+
+function syncLineWebhook() {
+  const token = PropertiesService
+    .getScriptProperties()
+    .getProperty("CHANNEL_ACCESS_TOKEN");
+
+  const response = UrlFetchApp.fetch("https://api.line.me/v2/bot/channel/webhook/endpoint", {
+    method: "put",
+    contentType: "application/json",
+    headers: {
+      Authorization: "Bearer " + token
+    },
+    payload: JSON.stringify({
+      endpoint: WEB_APP_URL
+    }),
+    muteHttpExceptions: true
+  });
+
+  console.log(response.getResponseCode());
+  console.log(response.getContentText());
+}
+
+function testLineWebhook() {
+  const token = PropertiesService
+    .getScriptProperties()
+    .getProperty("CHANNEL_ACCESS_TOKEN");
+
+  const response = UrlFetchApp.fetch("https://api.line.me/v2/bot/channel/webhook/endpoint", {
     method: "get",
     headers: {
       Authorization: "Bearer " + token

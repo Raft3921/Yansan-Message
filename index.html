@@ -253,6 +253,13 @@
       background: rgba(255, 255, 255, 0.24);
     }
 
+    .image-caption {
+      padding: 7px 3px 2px;
+      line-height: 1.35;
+      font-size: 14px;
+      font-weight: 800;
+    }
+
     .image-missing {
       padding: 9px 10px;
       color: var(--muted);
@@ -262,15 +269,19 @@
 
     .sticker-bubble {
       display: grid;
-      gap: 4px;
+      gap: 6px;
       min-width: 148px;
       background: #fff6c7;
       color: #273746;
+      justify-items: center;
     }
 
-    .sticker-mark {
-      font-size: 34px;
-      line-height: 1;
+    .sticker-image {
+      display: block;
+      width: 138px;
+      max-width: 44vw;
+      aspect-ratio: 1;
+      object-fit: contain;
     }
 
     .sticker-title {
@@ -326,6 +337,68 @@
       padding: 12px;
       font-size: 18px;
       line-height: 1.45;
+    }
+
+    .attachment-row {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .image-input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+
+    .attach-button,
+    .clear-image {
+      min-height: 40px;
+      border: 0;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 900;
+      touch-action: manipulation;
+    }
+
+    .attach-button {
+      background: #d7dde4;
+      color: #26313d;
+      padding: 8px 12px;
+    }
+
+    .clear-image {
+      background: transparent;
+      color: var(--danger);
+      padding: 8px 4px;
+    }
+
+    .image-preview {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .image-preview.active {
+      display: flex;
+    }
+
+    .image-preview img {
+      width: 42px;
+      height: 42px;
+      border-radius: 6px;
+      object-fit: cover;
+      background: #fff;
     }
 
     .group-row {
@@ -442,7 +515,16 @@
           <button class="delete-group" id="deleteGroupButton" type="button" disabled>削除</button>
         </div>
         <label for="messageText">本文</label>
-        <textarea id="messageText" required placeholder="メッセージを入力"></textarea>
+        <textarea id="messageText" placeholder="メッセージを入力"></textarea>
+        <div class="attachment-row">
+          <input class="image-input" id="imageInput" type="file" accept="image/png,image/jpeg,image/webp,image/*">
+          <button class="attach-button" id="attachButton" type="button">画像</button>
+          <div class="image-preview" id="imagePreview" aria-live="polite">
+            <img id="imagePreviewThumb" alt="">
+            <span id="imagePreviewName"></span>
+            <button class="clear-image" id="clearImageButton" type="button">取消</button>
+          </div>
+        </div>
         <button class="send" id="sendButton" type="submit">送信</button>
       </div>
     </form>
@@ -467,6 +549,12 @@
       var messageText = document.getElementById("messageText");
       var groupSelect = document.getElementById("groupSelect");
       var sendButton = document.getElementById("sendButton");
+      var imageInput = document.getElementById("imageInput");
+      var attachButton = document.getElementById("attachButton");
+      var imagePreview = document.getElementById("imagePreview");
+      var imagePreviewThumb = document.getElementById("imagePreviewThumb");
+      var imagePreviewName = document.getElementById("imagePreviewName");
+      var clearImageButton = document.getElementById("clearImageButton");
       var deleteGroupButton = document.getElementById("deleteGroupButton");
       var notifyButton = document.getElementById("notifyButton");
       var currentGroupName = document.getElementById("currentGroupName");
@@ -485,6 +573,7 @@
       var readTimes = readCache(READ_TIMES_KEY, {});
       var groupsCache = [];
       var imageDataUrlCache = {};
+      var selectedImage = null;
       var serviceWorkerRegistration = null;
 
       messageForm.addEventListener("submit", function (event) {
@@ -529,6 +618,12 @@
         deleteSelectedGroup();
       });
 
+      attachButton.addEventListener("click", function () {
+        imageInput.click();
+      });
+
+      imageInput.addEventListener("change", handleImageSelection);
+      clearImageButton.addEventListener("click", clearSelectedImage);
       notifyButton.addEventListener("click", requestNotifications);
       registerServiceWorker();
       listenForServiceWorkerMessages();
@@ -541,12 +636,17 @@
           showStatus("送信先グループを選択してください", "error");
           return;
         }
-        if (!body) {
+        if (!body && !selectedImage) {
           messageText.focus();
           return;
         }
 
         if (sendButton.disabled) {
+          return;
+        }
+
+        if (selectedImage) {
+          sendImageMessage(body, selectedImage);
           return;
         }
 
@@ -601,6 +701,138 @@
           removePendingLocalMessage(localMessage);
           loadMessages();
         }, 15000);
+      }
+
+      function sendImageMessage(caption, imageData) {
+        sendButton.disabled = true;
+        sendButton.textContent = "送信中";
+        messageText.value = "";
+        clearSelectedImage();
+
+        var localMessage = {
+          time: new Date().toISOString(),
+          sender: SENDER_NAME,
+          userId: "github-pages",
+          groupId: selectedGroupId,
+          groupName: getSelectedGroupName(),
+          text: caption || "写真を送信しました",
+          source: "githubPages",
+          messageType: "image",
+          imageUrl: imageData.dataUrl
+        };
+        pendingLocalMessages.push(localMessage);
+        rememberMessageKeys(selectedGroupId, [localMessage]);
+        markGroupRead(selectedGroupId);
+        appendLocalMessage(localMessage);
+        showStatus("画像送信中", "");
+
+        fetch(GAS_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8"
+          },
+          body: JSON.stringify({
+            action: "sendImage",
+            groupId: selectedGroupId,
+            sender: SENDER_NAME,
+            text: caption,
+            fileName: imageData.fileName,
+            imageDataUrl: imageData.dataUrl
+          })
+        }).then(function () {
+          showStatus("画像を送信しました", "");
+          window.setTimeout(loadMessages, 1800);
+        }).catch(function () {
+          showStatus("画像送信失敗", "error");
+          removePendingLocalMessage(localMessage);
+          messageText.value = caption;
+          loadMessages();
+        }).finally(function () {
+          sendButton.disabled = false;
+          sendButton.textContent = "送信";
+        });
+      }
+
+      function handleImageSelection() {
+        var file = imageInput.files && imageInput.files[0];
+        if (!file) {
+          clearSelectedImage();
+          return;
+        }
+        if (!/^image\//.test(file.type)) {
+          showStatus("画像ファイルを選択してください", "error");
+          clearSelectedImage();
+          return;
+        }
+
+        sendButton.disabled = true;
+        showStatus("画像を準備中", "");
+        readImageAsDataUrl(file).then(function (dataUrl) {
+          return resizeImageDataUrl(dataUrl, file.name);
+        }).then(function (imageData) {
+          selectedImage = imageData;
+          imagePreviewThumb.src = imageData.dataUrl;
+          imagePreviewName.textContent = imageData.fileName;
+          imagePreview.className = "image-preview active";
+          showStatus("画像を選択しました", "");
+        }).catch(function () {
+          showStatus("画像を読み込めません", "error");
+          clearSelectedImage();
+        }).finally(function () {
+          sendButton.disabled = false;
+        });
+      }
+
+      function clearSelectedImage() {
+        selectedImage = null;
+        imageInput.value = "";
+        imagePreviewThumb.removeAttribute("src");
+        imagePreviewName.textContent = "";
+        imagePreview.className = "image-preview";
+      }
+
+      function readImageAsDataUrl(file) {
+        return new Promise(function (resolve, reject) {
+          var reader = new FileReader();
+          reader.onload = function () {
+            resolve(String(reader.result || ""));
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+      }
+
+      function resizeImageDataUrl(dataUrl, fileName) {
+        return new Promise(function (resolve, reject) {
+          var img = new Image();
+          img.onload = function () {
+            var maxSide = 1280;
+            var width = img.naturalWidth || img.width;
+            var height = img.naturalHeight || img.height;
+            var scale = Math.min(1, maxSide / Math.max(width, height));
+            var canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(width * scale));
+            canvas.height = Math.max(1, Math.round(height * scale));
+            var context = canvas.getContext("2d");
+            if (!context) {
+              reject(new Error("canvas"));
+              return;
+            }
+            context.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve({
+              dataUrl: canvas.toDataURL("image/jpeg", 0.84),
+              fileName: normalizeImageFileName(fileName)
+            });
+          };
+          img.onerror = reject;
+          img.src = dataUrl;
+        });
+      }
+
+      function normalizeImageFileName(fileName) {
+        var baseName = String(fileName || "yansan-image").replace(/\.[A-Za-z0-9]+$/, "");
+        return baseName.replace(/[\\/:*?"<>|]+/g, "-") + ".jpg";
       }
 
       function deleteSelectedGroup() {
@@ -892,14 +1124,27 @@
 
           link.appendChild(image);
           bubble.appendChild(link);
+          if (text && text !== "写真を送信しました" && text !== "写真が届きました") {
+            var caption = document.createElement("div");
+            caption.className = "image-caption";
+            caption.textContent = text;
+            bubble.appendChild(caption);
+          }
         } else if (messageType === "image") {
           bubble.className += " image-missing";
           bubble.textContent = "写真を表示できません";
         } else if (messageType === "sticker") {
           bubble.className += " sticker-bubble";
-          var mark = document.createElement("div");
-          mark.className = "sticker-mark";
-          mark.textContent = "STAMP";
+          var stickerImageUrl = getStickerImageUrl(stickerId);
+          if (stickerImageUrl) {
+            var stickerImage = document.createElement("img");
+            stickerImage.className = "sticker-image";
+            stickerImage.src = stickerImageUrl;
+            stickerImage.alt = text || "スタンプ";
+            stickerImage.loading = "lazy";
+            stickerImage.decoding = "async";
+            bubble.appendChild(stickerImage);
+          }
 
           var title = document.createElement("div");
           title.className = "sticker-title";
@@ -909,7 +1154,6 @@
           detail.className = "sticker-detail";
           detail.textContent = formatStickerDetail(stickerPackageId, stickerId);
 
-          bubble.appendChild(mark);
           bubble.appendChild(title);
           if (detail.textContent) {
             bubble.appendChild(detail);
@@ -1279,6 +1523,13 @@
           parts.push("sticker " + stickerId);
         }
         return parts.join(" / ");
+      }
+
+      function getStickerImageUrl(stickerId) {
+        if (!stickerId || !/^\d+$/.test(String(stickerId))) {
+          return "";
+        }
+        return "https://stickershop.line-scdn.net/stickershop/v1/sticker/" + encodeURIComponent(stickerId) + "/iPhone/sticker.png";
       }
 
       function appendLinkedText(container, text) {

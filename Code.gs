@@ -20,7 +20,9 @@ function doPost(e) {
     return ContentService.createTextOutput("ok");
   }
 
-  const result = handlePagesMessage(data);
+  const result = data.action === "sendImage"
+    ? handlePagesImage(data)
+    : handlePagesMessage(data);
   return ContentService
     .createTextOutput(JSON.stringify(result))
     .setMimeType(ContentService.MimeType.JSON);
@@ -157,6 +159,90 @@ function handlePagesMessage(data) {
   };
 }
 
+function handlePagesImage(data) {
+  const props = PropertiesService.getScriptProperties();
+  const token = props.getProperty("CHANNEL_ACCESS_TOKEN");
+  const sheetId = props.getProperty("SPREADSHEET_ID");
+  const groupId = String(data.groupId || props.getProperty("GROUP_ID") || "");
+  const text = String(data.text || data.caption || "").trim();
+  const imageDataUrl = String(data.imageDataUrl || "");
+
+  if (!token || !sheetId || !groupId || !imageDataUrl) {
+    return {
+      ok: false,
+      error: !token ? "missing_channel_access_token" : (!sheetId ? "missing_spreadsheet_id" : "missing_fields")
+    };
+  }
+
+  const imageBlob = dataUrlToBlob(imageDataUrl, String(data.fileName || "yansan-image.jpg"));
+  if (!imageBlob) {
+    return {
+      ok: false,
+      error: "invalid_image"
+    };
+  }
+
+  const folder = getImageFolder();
+  const file = folder.createFile(imageBlob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+  const displayImageUrl = getDriveImageUrl(file);
+  const lineImageUrl = getDriveDownloadUrl(file);
+  const messages = [{
+    type: "image",
+    originalContentUrl: lineImageUrl,
+    previewImageUrl: lineImageUrl
+  }];
+
+  if (text) {
+    messages.push({ type: "text", text: text });
+  }
+
+  const response = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
+    method: "post",
+    headers: {
+      Authorization: "Bearer " + token,
+      "Content-Type": "application/json"
+    },
+    payload: JSON.stringify({
+      to: groupId,
+      messages: messages
+    }),
+    muteHttpExceptions: true
+  });
+  const lineStatus = response.getResponseCode();
+
+  if (lineStatus < 200 || lineStatus >= 300) {
+    file.setTrashed(true);
+    return {
+      ok: false,
+      error: "line_push_failed",
+      lineStatus: lineStatus
+    };
+  }
+
+  appendMessage({
+    time: new Date().toISOString(),
+    sender: String(data.senderName || data.sender || "やんさん"),
+    userId: "github-pages",
+    groupId: groupId,
+    groupName: getStoredGroupName(groupId),
+    text: text || "写真を送信しました",
+    source: "githubPages",
+    messageType: "image",
+    imageUrl: displayImageUrl,
+    stickerPackageId: "",
+    stickerId: "",
+    stickerResourceType: ""
+  });
+
+  return {
+    ok: true,
+    lineStatus: lineStatus,
+    imageUrl: displayImageUrl
+  };
+}
+
 function appendMessage(message) {
   const sheet = getSheet();
   sheet.appendRow([
@@ -256,6 +342,26 @@ function getDriveImageUrl(file) {
   const resourceKey = file.getResourceKey();
   return "https://drive.google.com/thumbnail?sz=w1200&id=" + encodeURIComponent(file.getId())
     + (resourceKey ? "&resourcekey=" + encodeURIComponent(resourceKey) : "");
+}
+
+function getDriveDownloadUrl(file) {
+  const resourceKey = file.getResourceKey();
+  return "https://drive.google.com/uc?export=download&id=" + encodeURIComponent(file.getId())
+    + (resourceKey ? "&resourcekey=" + encodeURIComponent(resourceKey) : "");
+}
+
+function dataUrlToBlob(dataUrl, fileName) {
+  const match = String(dataUrl || "").match(/^data:(image\/(?:jpeg|jpg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) {
+    return null;
+  }
+
+  const contentType = match[1] === "image/jpg" ? "image/jpeg" : match[1];
+  const bytes = Utilities.base64Decode(match[2]);
+  const safeName = String(fileName || "yansan-image.jpg").replace(/[\\/:*?"<>|]+/g, "-");
+  const extension = contentType.indexOf("png") !== -1 ? ".png" : ".jpg";
+  const name = /\.[A-Za-z0-9]+$/.test(safeName) ? safeName : safeName + extension;
+  return Utilities.newBlob(bytes, contentType, name);
 }
 
 function getImageDataPayload(imageUrl) {

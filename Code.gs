@@ -63,19 +63,18 @@ function getPayload(action, parameter, groupId) {
 
 function handleLineWebhook(events) {
   events.forEach(function (event) {
-    if (event.source && event.source.groupId) {
-      upsertGroup(event.source.groupId);
-    }
-
     if (!event.message || ["text", "image", "sticker"].indexOf(event.message.type) === -1) {
       return;
     }
 
     const userId = event.source && event.source.userId ? event.source.userId : "";
     const sourceType = event.source && event.source.type ? event.source.type : "";
-    const groupId = event.source && event.source.groupId ? event.source.groupId : "";
-    const groupName = groupId ? getGroupName(groupId) : "";
+    const conversationId = getConversationId(event.source);
     const senderName = getDisplayName(event.source, userId);
+    const groupName = getConversationName(event.source, senderName, conversationId);
+    if (conversationId) {
+      upsertGroup(conversationId, groupName);
+    }
     const timestamp = new Date(event.timestamp || Date.now()).toISOString();
     const messageType = event.message.type;
     const imageUrl = messageType === "image" ? saveLineImage(event.message) : "";
@@ -87,7 +86,7 @@ function handleLineWebhook(events) {
       time: timestamp,
       sender: senderName,
       userId: userId,
-      groupId: groupId,
+      groupId: conversationId,
       groupName: groupName,
       text: getMessageText(event.message),
       source: sourceType,
@@ -561,14 +560,14 @@ function ensureHeaders(sheet, headers) {
   }
 }
 
-function upsertGroup(groupId) {
+function upsertGroup(groupId, preferredName) {
   if (isDeletedGroup(groupId)) {
     return;
   }
 
   const sheet = getGroupSheet();
   const lastRow = sheet.getLastRow();
-  const groupName = getGroupName(groupId);
+  const groupName = preferredName || getGroupName(groupId);
   const lastSeenAt = new Date().toISOString();
 
   if (lastRow > 1) {
@@ -713,6 +712,29 @@ function getGroupName(groupId) {
 
   const summary = JSON.parse(response.getContentText() || "{}");
   return summary.groupName || groupId;
+}
+
+function getConversationId(source) {
+  if (!source) {
+    return "";
+  }
+  return source.groupId || source.roomId || source.userId || "";
+}
+
+function getConversationName(source, senderName, conversationId) {
+  if (!conversationId) {
+    return "";
+  }
+  if (source && source.type === "group" && source.groupId) {
+    return getGroupName(source.groupId);
+  }
+  if (source && source.type === "room" && source.roomId) {
+    return senderName ? "ルーム: " + senderName : "ルーム " + conversationId.slice(-6);
+  }
+  if (source && source.type === "user" && source.userId) {
+    return senderName || "個別チャット " + conversationId.slice(-6);
+  }
+  return conversationId;
 }
 
 function sanitizeCallback(callback) {

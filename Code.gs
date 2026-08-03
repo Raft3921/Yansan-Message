@@ -20,8 +20,10 @@ function doPost(e) {
     return ContentService.createTextOutput("ok");
   }
 
-  handlePagesMessage(data);
-  return ContentService.createTextOutput("ok");
+  const result = handlePagesMessage(data);
+  return ContentService
+    .createTextOutput(JSON.stringify(result))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 function doGet(e) {
@@ -99,14 +101,38 @@ function handleLineWebhook(events) {
 function handlePagesMessage(data) {
   const props = PropertiesService.getScriptProperties();
   const token = props.getProperty("CHANNEL_ACCESS_TOKEN");
+  const sheetId = props.getProperty("SPREADSHEET_ID");
   const groupId = String(data.groupId || props.getProperty("GROUP_ID") || "");
-  const groupName = getStoredGroupName(groupId);
   const text = String(data.text || data.body || "");
 
-  if (!groupId || !text) {
+  if (!token || !sheetId || !groupId || !text) {
     return {
       ok: false,
-      error: "missing_fields"
+      error: !token ? "missing_channel_access_token" : (!sheetId ? "missing_spreadsheet_id" : "missing_fields")
+    };
+  }
+
+  const groupName = getStoredGroupName(groupId);
+
+  const response = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
+    method: "post",
+    headers: {
+      Authorization: "Bearer " + token,
+      "Content-Type": "application/json"
+    },
+    payload: JSON.stringify({
+      to: groupId,
+      messages: [{ type: "text", text: text }]
+    }),
+    muteHttpExceptions: true
+  });
+  const lineStatus = response.getResponseCode();
+
+  if (lineStatus < 200 || lineStatus >= 300) {
+    return {
+      ok: false,
+      error: "line_push_failed",
+      lineStatus: lineStatus
     };
   }
 
@@ -125,22 +151,9 @@ function handlePagesMessage(data) {
     stickerResourceType: ""
   });
 
-  const response = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
-    method: "post",
-    headers: {
-      Authorization: "Bearer " + token,
-      "Content-Type": "application/json"
-    },
-    payload: JSON.stringify({
-      to: groupId,
-      messages: [{ type: "text", text: text }]
-    }),
-    muteHttpExceptions: true
-  });
-
   return {
-    ok: response.getResponseCode() >= 200 && response.getResponseCode() < 300,
-    lineStatus: response.getResponseCode()
+    ok: true,
+    lineStatus: lineStatus
   };
 }
 

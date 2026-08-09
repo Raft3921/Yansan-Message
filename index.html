@@ -674,33 +674,75 @@
         appendLocalMessage(localMessage);
         showStatus("送信中", "");
 
-        loadJsonp({
-          action: "sendMessage",
-          groupId: payload.groupId,
-          sender: payload.sender,
-          text: payload.text
-        }, function (data) {
+        postMessageAndWait(payload, localMessage, body).then(function () {
           sendButton.disabled = false;
           sendButton.textContent = "送信";
-          if (data && data.ok) {
-            showStatus("送信しました", "");
-            window.setTimeout(loadMessages, 900);
-            return;
-          }
-          showStatus("送信失敗（LINE " + (data && data.lineStatus ? data.lineStatus : "エラー") + "）", "error");
+          showStatus("送信しました", "");
+          removePendingLocalMessage(localMessage);
+          loadMessages();
+        }).catch(function (error) {
+          sendButton.disabled = false;
+          sendButton.textContent = "送信";
+          showStatus(error && error.message ? error.message : "送信失敗", "error");
           messageText.value = body;
           messageText.focus();
           removePendingLocalMessage(localMessage);
           loadMessages();
-        }, function () {
-          sendButton.disabled = false;
-          sendButton.textContent = "送信";
-          showStatus("送信失敗", "error");
-          messageText.value = body;
-          messageText.focus();
-          removePendingLocalMessage(localMessage);
-          loadMessages();
-        }, 15000);
+        });
+      }
+
+      function postMessageAndWait(payload, localMessage, originalBody) {
+        return fetch(GAS_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8"
+          },
+          body: JSON.stringify({
+            action: "sendMessage",
+            groupId: payload.groupId,
+            sender: payload.sender,
+            text: payload.text
+          })
+        }).then(function () {
+          return waitForPostedMessage(localMessage, originalBody, 10);
+        }).catch(function () {
+          throw new Error("送信失敗（通信エラー）");
+        });
+      }
+
+      function waitForPostedMessage(localMessage, originalBody, attemptsLeft) {
+        return new Promise(function (resolve, reject) {
+          window.setTimeout(function () {
+            loadJsonp({
+              action: "messages",
+              groupId: localMessage.groupId,
+              limit: "20"
+            }, function (data) {
+              var rows = normalizeList(data, "messages");
+              var found = rows.some(function (row) {
+                return getField(row, ["text", "body", "message"]) === originalBody
+                  && getField(row, ["groupId"]) === localMessage.groupId
+                  && isOwnMessage(row);
+              });
+              if (found) {
+                resolve();
+                return;
+              }
+              if (attemptsLeft <= 1) {
+                reject(new Error("送信失敗（LINEへ反映されませんでした）"));
+                return;
+              }
+              waitForPostedMessage(localMessage, originalBody, attemptsLeft - 1).then(resolve, reject);
+            }, function () {
+              if (attemptsLeft <= 1) {
+                reject(new Error("送信失敗（確認できませんでした）"));
+                return;
+              }
+              waitForPostedMessage(localMessage, originalBody, attemptsLeft - 1).then(resolve, reject);
+            }, 12000);
+          }, 2500);
+        });
       }
 
       function sendImageMessage(caption, imageData) {

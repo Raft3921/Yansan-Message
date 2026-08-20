@@ -674,29 +674,61 @@
         appendLocalMessage(localMessage);
         showStatus("送信中", "");
 
-        postMessageAndWait(payload, localMessage, body).catch(function (error) {
-          return fallbackJsonpMessage(payload, localMessage, body, error);
-        }).then(function () {
+        sendTextMessageWithRecovery(payload, localMessage, body);
+      }
+
+      function sendTextMessageWithRecovery(payload, localMessage, originalBody) {
+        var uiRestored = false;
+        var restoreTimer = window.setTimeout(function () {
+          restoreSendUi("送信を確認中", "");
+        }, 8000);
+
+        function restoreSendUi(statusText, statusType) {
+          if (uiRestored) {
+            return;
+          }
+          uiRestored = true;
+          window.clearTimeout(restoreTimer);
           sendButton.disabled = false;
           sendButton.textContent = "送信";
+          showStatus(statusText, statusType || "");
+        }
+
+        postMessageRequest(payload, 12000).then(function () {
+          restoreSendUi("送信を確認中", "");
+          return waitForPostedMessage(localMessage, originalBody, 18);
+        }).then(function () {
           showStatus("送信しました", "");
           removePendingLocalMessage(localMessage);
           loadMessages();
         }).catch(function (error) {
-          sendButton.disabled = false;
-          sendButton.textContent = "送信";
-          showStatus(error && error.message ? error.message : "送信失敗", "error");
-          messageText.value = body;
-          messageText.focus();
-          removePendingLocalMessage(localMessage);
-          loadMessages();
+          restoreSendUi("送信を再試行中", "");
+          fallbackJsonpMessage(payload, localMessage, originalBody, error).then(function () {
+            showStatus("送信しました", "");
+            removePendingLocalMessage(localMessage);
+            loadMessages();
+          }).catch(function (fallbackError) {
+            showStatus(fallbackError && fallbackError.message ? fallbackError.message : "送信失敗", "error");
+            messageText.value = originalBody;
+            messageText.focus();
+            removePendingLocalMessage(localMessage);
+            loadMessages();
+          });
         });
       }
 
-      function postMessageAndWait(payload, localMessage, originalBody) {
+      function postMessageRequest(payload, timeoutMs) {
+        var controller = window.AbortController ? new AbortController() : null;
+        var timer = window.setTimeout(function () {
+          if (controller) {
+            controller.abort();
+          }
+        }, timeoutMs || 12000);
+
         return fetch(GAS_URL, {
           method: "POST",
           mode: "no-cors",
+          signal: controller ? controller.signal : undefined,
           headers: {
             "Content-Type": "text/plain;charset=utf-8"
           },
@@ -708,8 +740,8 @@
           })
         }).catch(function () {
           throw new Error("送信失敗（通信エラー）");
-        }).then(function () {
-          return waitForPostedMessage(localMessage, originalBody, 18);
+        }).finally(function () {
+          window.clearTimeout(timer);
         });
       }
 

@@ -674,7 +674,9 @@
         appendLocalMessage(localMessage);
         showStatus("送信中", "");
 
-        postMessageAndWait(payload, localMessage, body).then(function () {
+        postMessageAndWait(payload, localMessage, body).catch(function (error) {
+          return fallbackJsonpMessage(payload, localMessage, body, error);
+        }).then(function () {
           sendButton.disabled = false;
           sendButton.textContent = "送信";
           showStatus("送信しました", "");
@@ -704,11 +706,47 @@
             sender: payload.sender,
             text: payload.text
           })
-        }).then(function () {
-          return waitForPostedMessage(localMessage, originalBody, 10);
         }).catch(function () {
           throw new Error("送信失敗（通信エラー）");
+        }).then(function () {
+          return waitForPostedMessage(localMessage, originalBody, 18);
         });
+      }
+
+      function fallbackJsonpMessage(payload, localMessage, originalBody, firstError) {
+        if (originalBody.length > 900) {
+          throw firstError || new Error("送信失敗");
+        }
+
+        showStatus("送信を再試行中", "");
+        return waitForPostedMessage(localMessage, originalBody, 2).catch(function () {
+          return new Promise(function (resolve, reject) {
+            loadJsonp({
+              action: "sendMessage",
+              groupId: payload.groupId,
+              sender: payload.sender,
+              text: payload.text
+            }, function (data) {
+              if (data && data.ok) {
+                resolve();
+                return;
+              }
+              reject(new Error(formatSendFailure(data, firstError)));
+            }, function () {
+              reject(firstError || new Error("送信失敗（再試行も失敗）"));
+            }, 20000);
+          });
+        });
+      }
+
+      function formatSendFailure(data, fallbackError) {
+        if (data && data.error === "line_push_failed") {
+          return "送信失敗（LINE " + (data.lineStatus || "エラー") + "）";
+        }
+        if (data && data.error) {
+          return "送信失敗（" + data.error + "）";
+        }
+        return fallbackError && fallbackError.message ? fallbackError.message : "送信失敗";
       }
 
       function waitForPostedMessage(localMessage, originalBody, attemptsLeft) {

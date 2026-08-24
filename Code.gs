@@ -115,12 +115,6 @@ function handlePagesMessage(data) {
   }
 
   const groupName = getStoredGroupName(groupId);
-  if (hasRecentPagesMessage(groupId, text, 2 * 60 * 1000)) {
-    return {
-      ok: true,
-      duplicate: true
-    };
-  }
 
   const response = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
     method: "post",
@@ -163,27 +157,6 @@ function handlePagesMessage(data) {
     ok: true,
     lineStatus: lineStatus
   };
-}
-
-function hasRecentPagesMessage(groupId, text, windowMillis) {
-  const sheet = getSheet();
-  const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) {
-    return false;
-  }
-
-  const startRow = Math.max(2, lastRow - 49);
-  const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, SHEET_HEADERS.length).getValues();
-  const cutoff = Date.now() - windowMillis;
-
-  return values.some(function (row) {
-    const rowTime = new Date(row[0]).getTime();
-    return rowTime >= cutoff
-      && String(row[3] || "") === groupId
-      && String(row[5] || "") === text
-      && String(row[6] || "") === "githubPages"
-      && String(row[7] || "text") === "text";
-  });
 }
 
 function handlePagesImage(data) {

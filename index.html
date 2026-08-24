@@ -665,124 +665,39 @@
         sendButton.disabled = true;
         sendButton.textContent = "送信中";
         saveCurrentDraft();
-        var localMessage = {
-          time: new Date().toISOString(),
-          sender: SENDER_NAME,
-          userId: "github-pages",
-          groupId: selectedGroupId,
-          groupName: getSelectedGroupName(),
-          text: body,
-          source: "githubPages"
-        };
-        pendingLocalMessages.push(localMessage);
-        rememberMessageKeys(selectedGroupId, [localMessage]);
         markGroupRead(selectedGroupId);
-        appendLocalMessage(localMessage);
         showStatus("送信中", "");
 
-        sendTextMessageWithRecovery(payload, localMessage, body, sendKey);
+        sendTextMessage(payload, body, sendKey);
       }
 
-      function sendTextMessageWithRecovery(payload, localMessage, originalBody, sendKey) {
-        var uiRestored = false;
-        var restoreTimer = window.setTimeout(function () {
-          restoreSendUi("送信を確認中", "");
-        }, 8000);
-
-        function restoreSendUi(statusText, statusType) {
-          if (uiRestored) {
-            return;
-          }
-          uiRestored = true;
-          window.clearTimeout(restoreTimer);
+      function sendTextMessage(payload, originalBody, sendKey) {
+        loadJsonp({
+          action: "sendMessage",
+          groupId: payload.groupId,
+          sender: payload.sender,
+          text: payload.text
+        }, function (data) {
+          pendingTextSends[sendKey] = false;
           sendButton.disabled = false;
           sendButton.textContent = "送信";
-          showStatus(statusText, statusType || "");
-        }
-
-        postMessageRequest(payload, 12000).then(function () {
-          restoreSendUi("送信を確認中", "");
-          return waitForPostedMessage(localMessage, originalBody, 18);
-        }).then(function () {
-          showStatus("送信しました", "");
-          pendingTextSends[sendKey] = false;
-          clearDraftIfUnchanged(payload.groupId, originalBody);
-          removePendingLocalMessage(localMessage);
-          loadMessages();
-        }).catch(function (error) {
-          restoreSendUi("送信を再試行中", "");
-          fallbackJsonpMessage(payload, localMessage, originalBody, error).then(function () {
+          if (data && data.ok) {
             showStatus("送信しました", "");
-            pendingTextSends[sendKey] = false;
             clearDraftIfUnchanged(payload.groupId, originalBody);
-            removePendingLocalMessage(localMessage);
             loadMessages();
-          }).catch(function (fallbackError) {
-            pendingTextSends[sendKey] = false;
-            showStatus(fallbackError && fallbackError.message ? fallbackError.message : "送信失敗", "error");
-            if (!messageText.value.trim() || messageText.value.trim() === originalBody) {
-              messageText.value = originalBody;
-              saveCurrentDraft();
-            }
-            messageText.focus();
-            removePendingLocalMessage(localMessage);
-            loadMessages();
-          });
-        });
-      }
-
-      function postMessageRequest(payload, timeoutMs) {
-        var controller = window.AbortController ? new AbortController() : null;
-        var timer = window.setTimeout(function () {
-          if (controller) {
-            controller.abort();
+            return;
           }
-        }, timeoutMs || 12000);
-
-        return fetch(GAS_URL, {
-          method: "POST",
-          mode: "no-cors",
-          signal: controller ? controller.signal : undefined,
-          headers: {
-            "Content-Type": "text/plain;charset=utf-8"
-          },
-          body: JSON.stringify({
-            action: "sendMessage",
-            groupId: payload.groupId,
-            sender: payload.sender,
-            text: payload.text
-          })
-        }).catch(function () {
-          throw new Error("送信失敗（通信エラー）");
-        }).finally(function () {
-          window.clearTimeout(timer);
-        });
-      }
-
-      function fallbackJsonpMessage(payload, localMessage, originalBody, firstError) {
-        if (originalBody.length > 900) {
-          throw firstError || new Error("送信失敗");
-        }
-
-        showStatus("送信を再試行中", "");
-        return waitForPostedMessage(localMessage, originalBody, 2).catch(function () {
-          return new Promise(function (resolve, reject) {
-            loadJsonp({
-              action: "sendMessage",
-              groupId: payload.groupId,
-              sender: payload.sender,
-              text: payload.text
-            }, function (data) {
-              if (data && data.ok) {
-                resolve();
-                return;
-              }
-              reject(new Error(formatSendFailure(data, firstError)));
-            }, function () {
-              reject(firstError || new Error("送信失敗（再試行も失敗）"));
-            }, 20000);
-          });
-        });
+          showStatus(formatSendFailure(data), "error");
+          messageText.focus();
+          loadMessages();
+        }, function () {
+          pendingTextSends[sendKey] = false;
+          sendButton.disabled = false;
+          sendButton.textContent = "送信";
+          showStatus("送信失敗（通信確認できません）", "error");
+          messageText.focus();
+          loadMessages();
+        }, 25000);
       }
 
       function formatSendFailure(data, fallbackError) {
@@ -838,51 +753,6 @@
             localStorage.removeItem(getDraftKey(groupId));
           }
         } catch (error) {}
-      }
-
-      function waitForPostedMessage(localMessage, originalBody, attemptsLeft) {
-        return new Promise(function (resolve, reject) {
-          window.setTimeout(function () {
-            loadJsonp({
-              action: "messages",
-              groupId: localMessage.groupId,
-              limit: "20"
-            }, function (data) {
-              var rows = normalizeList(data, "messages");
-              var found = rows.some(function (row) {
-                return isMatchingPostedMessage(row, localMessage, originalBody);
-              });
-              if (found) {
-                resolve();
-                return;
-              }
-              if (attemptsLeft <= 1) {
-                reject(new Error("送信失敗（LINEへ反映されませんでした）"));
-                return;
-              }
-              waitForPostedMessage(localMessage, originalBody, attemptsLeft - 1).then(resolve, reject);
-            }, function () {
-              if (attemptsLeft <= 1) {
-                reject(new Error("送信失敗（確認できませんでした）"));
-                return;
-              }
-              waitForPostedMessage(localMessage, originalBody, attemptsLeft - 1).then(resolve, reject);
-            }, 12000);
-          }, 2500);
-        });
-      }
-
-      function isMatchingPostedMessage(row, localMessage, originalBody) {
-        var rowTime = getField(row, ["time", "timestamp", "datetime", "date"]);
-        var rowMillis = new Date(rowTime).getTime();
-        var localMillis = new Date(localMessage.time).getTime();
-        if (Number.isNaN(rowMillis) || Number.isNaN(localMillis) || rowMillis < localMillis - 3000) {
-          return false;
-        }
-
-        return getField(row, ["text", "body", "message"]) === originalBody
-          && getField(row, ["groupId"]) === localMessage.groupId
-          && isOwnMessage(row);
       }
 
       function sendImageMessage(caption, imageData) {

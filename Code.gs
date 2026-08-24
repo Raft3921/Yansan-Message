@@ -7,8 +7,8 @@ const SHEET_HEADERS = ["time", "sender", "userId", "groupId", "groupName", "text
 const LEGACY_SHEET_HEADERS = ["timestamp", "senderName", "userId", "text", "sourceType", "groupId"];
 const GROUP_HEADERS = ["groupId", "groupName", "lastSeenAt"];
 const DELETED_GROUP_HEADERS = ["groupId", "deletedAt"];
-const LINE_PUSH_MIN_INTERVAL_MS = 1800;
-const LINE_PUSH_RETRY_DELAYS_MS = [3000, 7000, 15000];
+const LINE_PUSH_MIN_INTERVAL_MS = 1200;
+const LINE_PUSH_RETRY_DELAYS_MS = [2500, 5000];
 
 function doPost(e) {
   const data = JSON.parse(e.postData.contents || "{}");
@@ -33,10 +33,19 @@ function doPost(e) {
 
 function doGet(e) {
   const callback = sanitizeCallback(e.parameter.callback || "callback");
-  const action = e.parameter.action || "messages";
-  const defaultGroupId = PropertiesService.getScriptProperties().getProperty("GROUP_ID") || "";
-  const groupId = String(e.parameter.groupId || defaultGroupId);
-  const payload = getPayload(action, e.parameter, groupId);
+  let payload;
+  try {
+    const action = e.parameter.action || "messages";
+    const defaultGroupId = PropertiesService.getScriptProperties().getProperty("GROUP_ID") || "";
+    const groupId = String(e.parameter.groupId || defaultGroupId);
+    payload = getPayload(action, e.parameter, groupId);
+  } catch (error) {
+    payload = {
+      ok: false,
+      error: "server_exception",
+      message: String(error && error.message ? error.message : error)
+    };
+  }
   const body = callback + "(" + JSON.stringify(payload) + ");";
 
   return ContentService
@@ -233,7 +242,13 @@ function handlePagesImage(data) {
 
 function pushLineMessages(token, groupId, messages) {
   const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  if (!lock.tryLock(5000)) {
+    return {
+      lineStatus: 429,
+      attempts: 0,
+      lineBody: "send_busy"
+    };
+  }
 
   try {
     let result = null;

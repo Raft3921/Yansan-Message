@@ -666,7 +666,7 @@
         sendButton.textContent = "送信中";
         saveCurrentDraft();
         markGroupRead(selectedGroupId);
-        showStatus("送信中", "");
+        showStatus("送信中（最大30秒）", "");
 
         sendTextMessage(payload, body, sendKey);
       }
@@ -694,10 +694,10 @@
           pendingTextSends[sendKey] = false;
           sendButton.disabled = false;
           sendButton.textContent = "送信";
-          showStatus("送信失敗（通信確認できません）", "error");
+          showStatus("送信失敗（30秒以内に確認できません。届いていなければ少し待って再送してください）", "error");
           messageText.focus();
           loadMessages();
-        }, 70000);
+        }, 30000);
       }
 
       function formatSendFailure(data, fallbackError) {

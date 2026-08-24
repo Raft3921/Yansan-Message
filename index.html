@@ -702,11 +702,18 @@
       }
 
       function formatSendFailure(data, fallbackError) {
+        if (data && data.error === "line_quota_exhausted") {
+          var quotaValue = data.quota && data.quota.value;
+          var totalUsage = data.consumption && data.consumption.totalUsage;
+          var quotaDetail = quotaValue ? "（" + totalUsage + "/" + quotaValue + "）" : "";
+          return "送信不可：LINEの月間送信枠を使い切っています" + quotaDetail;
+        }
         if (data && data.error === "line_push_failed") {
+          var detail = data.lineBody ? "：" + String(data.lineBody) : "";
           if (Number(data.lineStatus) === 429) {
-            return "送信失敗（LINE混雑中。少し待ってもう一度送信してください）";
+            return "送信失敗（LINE 429" + detail + "）";
           }
-          return "送信失敗（LINE " + (data.lineStatus || "エラー") + "）";
+          return "送信失敗（LINE " + (data.lineStatus || "エラー") + detail + "）";
         }
         if (data && data.error) {
           return "送信失敗（" + data.error + "）";

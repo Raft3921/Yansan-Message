@@ -66,6 +66,10 @@ function getPayload(action, parameter, groupId) {
     });
   }
 
+  if (action === "lineStatus") {
+    return getLineStatusPayload();
+  }
+
   if (action === "imageData") {
     return getImageDataPayload(String(parameter.imageUrl || ""));
   }
@@ -126,6 +130,10 @@ function handlePagesMessage(data) {
   }
 
   const groupName = getStoredGroupName(groupId);
+  const quotaError = getLineQuotaError(token);
+  if (quotaError) {
+    return quotaError;
+  }
 
   const pushResult = pushLineMessages(token, groupId, [{ type: "text", text: text }]);
   const lineStatus = pushResult.lineStatus;
@@ -200,6 +208,12 @@ function handlePagesImage(data) {
 
   if (text) {
     messages.push({ type: "text", text: text });
+  }
+
+  const quotaError = getLineQuotaError(token);
+  if (quotaError) {
+    file.setTrashed(true);
+    return quotaError;
   }
 
   const pushResult = pushLineMessages(token, groupId, messages);
@@ -321,6 +335,75 @@ function getResponseHeaders(response) {
 
 function truncateLineBody(body) {
   return String(body || "").replace(/\s+/g, " ").slice(0, 240);
+}
+
+function getLineStatusPayload() {
+  const token = PropertiesService.getScriptProperties().getProperty("CHANNEL_ACCESS_TOKEN");
+  if (!token) {
+    return {
+      ok: false,
+      error: "missing_channel_access_token"
+    };
+  }
+
+  const quota = fetchLineJson(token, "https://api.line.me/v2/bot/message/quota");
+  const consumption = fetchLineJson(token, "https://api.line.me/v2/bot/message/quota/consumption");
+
+  return {
+    ok: quota.status >= 200 && quota.status < 300 && consumption.status >= 200 && consumption.status < 300,
+    quota: quota,
+    consumption: consumption,
+    checkedAt: new Date().toISOString()
+  };
+}
+
+function getLineQuotaError(token) {
+  const quota = fetchLineJson(token, "https://api.line.me/v2/bot/message/quota");
+  const consumption = fetchLineJson(token, "https://api.line.me/v2/bot/message/quota/consumption");
+  const quotaValue = Number(quota.body && quota.body.value);
+  const totalUsage = Number(consumption.body && consumption.body.totalUsage);
+
+  if (quota.status >= 200 && quota.status < 300
+    && consumption.status >= 200 && consumption.status < 300
+    && quota.body
+    && quota.body.type === "limited"
+    && Number.isFinite(quotaValue)
+    && Number.isFinite(totalUsage)
+    && totalUsage >= quotaValue) {
+    return {
+      ok: false,
+      error: "line_quota_exhausted",
+      lineStatus: 429,
+      quota: quota.body,
+      consumption: consumption.body
+    };
+  }
+
+  return null;
+}
+
+function fetchLineJson(token, url) {
+  const response = UrlFetchApp.fetch(url, {
+    method: "get",
+    headers: {
+      Authorization: "Bearer " + token
+    },
+    muteHttpExceptions: true
+  });
+  const body = response.getContentText();
+  return {
+    status: response.getResponseCode(),
+    body: parseJsonBody(body),
+    text: truncateLineBody(body)
+  };
+}
+
+function parseJsonBody(body) {
+  try {
+    return JSON.parse(body || "{}");
+  } catch (error) {
+    return {};
+  }
 }
 
 function appendMessage(message) {

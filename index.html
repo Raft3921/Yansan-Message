@@ -577,6 +577,7 @@
       var selectedImage = null;
       var serviceWorkerRegistration = null;
       var pendingTextSends = {};
+      var statusHoldUntil = 0;
 
       messageForm.addEventListener("submit", function (event) {
         event.preventDefault();
@@ -682,19 +683,19 @@
           sendButton.disabled = false;
           sendButton.textContent = "送信";
           if (data && data.ok) {
-            showStatus("送信しました", "");
+            showStatus("送信しました", "", 12000);
             clearDraftIfUnchanged(payload.groupId, originalBody);
             loadMessages();
             return;
           }
-          showStatus(formatSendFailure(data), "error");
+          showStatus(formatSendFailure(data), "error", 30000);
           messageText.focus();
           loadMessages();
         }, function () {
           pendingTextSends[sendKey] = false;
           sendButton.disabled = false;
           sendButton.textContent = "送信";
-          showStatus("送信失敗（30秒以内に確認できません。届いていなければ少し待って再送してください）", "error");
+          showStatus("送信失敗（30秒以内に確認できません。届いていなければ少し待って再送してください）", "error", 30000);
           messageText.focus();
           loadMessages();
         }, 30000);
@@ -940,9 +941,9 @@
           saveMessagesCache(selectedGroupId, rows);
           markGroupRead(selectedGroupId);
           renderMessages(rows);
-          showStatus(formatCount(rows.length), "");
+          showStatusIfFree(formatCount(rows.length), "");
         }, function () {
-          showStatus("読み込み失敗", "error");
+          showStatusIfFree("読み込み失敗", "error");
         });
       }
 
@@ -1842,9 +1843,17 @@
         });
       }
 
-      function showStatus(message, type) {
+      function showStatus(message, type, holdMs) {
         listStatus.textContent = message;
         listStatus.className = "status" + (type ? " " + type : "");
+        statusHoldUntil = holdMs ? Date.now() + holdMs : 0;
+      }
+
+      function showStatusIfFree(message, type) {
+        if (Date.now() < statusHoldUntil) {
+          return;
+        }
+        showStatus(message, type);
       }
 
       function formatCount(count) {

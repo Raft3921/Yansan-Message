@@ -697,11 +697,14 @@
           showStatus("送信失敗（通信確認できません）", "error");
           messageText.focus();
           loadMessages();
-        }, 25000);
+        }, 70000);
       }
 
       function formatSendFailure(data, fallbackError) {
         if (data && data.error === "line_push_failed") {
+          if (Number(data.lineStatus) === 429) {
+            return "送信失敗（LINE混雑中。少し待ってもう一度送信してください）";
+          }
           return "送信失敗（LINE " + (data.lineStatus || "エラー") + "）";
         }
         if (data && data.error) {

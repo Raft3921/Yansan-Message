@@ -7,6 +7,8 @@ const SHEET_HEADERS = ["time", "sender", "userId", "groupId", "groupName", "text
 const LEGACY_SHEET_HEADERS = ["timestamp", "senderName", "userId", "text", "sourceType", "groupId"];
 const GROUP_HEADERS = ["groupId", "groupName", "lastSeenAt"];
 const DELETED_GROUP_HEADERS = ["groupId", "deletedAt"];
+const LINE_PUSH_MIN_INTERVAL_MS = 1800;
+const LINE_PUSH_RETRY_DELAYS_MS = [3000, 7000, 15000];
 
 function doPost(e) {
   const data = JSON.parse(e.postData.contents || "{}");
@@ -116,25 +118,17 @@ function handlePagesMessage(data) {
 
   const groupName = getStoredGroupName(groupId);
 
-  const response = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
-    method: "post",
-    headers: {
-      Authorization: "Bearer " + token,
-      "Content-Type": "application/json"
-    },
-    payload: JSON.stringify({
-      to: groupId,
-      messages: [{ type: "text", text: text }]
-    }),
-    muteHttpExceptions: true
-  });
-  const lineStatus = response.getResponseCode();
+  const pushResult = pushLineMessages(token, groupId, [{ type: "text", text: text }]);
+  const lineStatus = pushResult.lineStatus;
 
   if (lineStatus < 200 || lineStatus >= 300) {
     return {
       ok: false,
       error: "line_push_failed",
-      lineStatus: lineStatus
+      lineStatus: lineStatus,
+      retryable: lineStatus === 429,
+      attempts: pushResult.attempts,
+      lineBody: pushResult.lineBody
     };
   }
 
@@ -155,7 +149,8 @@ function handlePagesMessage(data) {
 
   return {
     ok: true,
-    lineStatus: lineStatus
+    lineStatus: lineStatus,
+    attempts: pushResult.attempts
   };
 }
 
@@ -198,26 +193,18 @@ function handlePagesImage(data) {
     messages.push({ type: "text", text: text });
   }
 
-  const response = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
-    method: "post",
-    headers: {
-      Authorization: "Bearer " + token,
-      "Content-Type": "application/json"
-    },
-    payload: JSON.stringify({
-      to: groupId,
-      messages: messages
-    }),
-    muteHttpExceptions: true
-  });
-  const lineStatus = response.getResponseCode();
+  const pushResult = pushLineMessages(token, groupId, messages);
+  const lineStatus = pushResult.lineStatus;
 
   if (lineStatus < 200 || lineStatus >= 300) {
     file.setTrashed(true);
     return {
       ok: false,
       error: "line_push_failed",
-      lineStatus: lineStatus
+      lineStatus: lineStatus,
+      retryable: lineStatus === 429,
+      attempts: pushResult.attempts,
+      lineBody: pushResult.lineBody
     };
   }
 
@@ -239,8 +226,86 @@ function handlePagesImage(data) {
   return {
     ok: true,
     lineStatus: lineStatus,
+    attempts: pushResult.attempts,
     imageUrl: displayImageUrl
   };
+}
+
+function pushLineMessages(token, groupId, messages) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+
+  try {
+    let result = null;
+    for (let attempt = 0; attempt <= LINE_PUSH_RETRY_DELAYS_MS.length; attempt += 1) {
+      waitForLinePushSlot();
+      const response = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
+        method: "post",
+        headers: {
+          Authorization: "Bearer " + token,
+          "Content-Type": "application/json"
+        },
+        payload: JSON.stringify({
+          to: groupId,
+          messages: messages
+        }),
+        muteHttpExceptions: true
+      });
+      recordLinePushAttempt();
+      result = getLinePushResult(response, attempt + 1);
+
+      if (result.lineStatus !== 429 || attempt >= LINE_PUSH_RETRY_DELAYS_MS.length) {
+        return result;
+      }
+
+      Utilities.sleep(getLineRetryDelay(response, LINE_PUSH_RETRY_DELAYS_MS[attempt]));
+    }
+    return result;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function waitForLinePushSlot() {
+  const cache = CacheService.getScriptCache();
+  const lastAttempt = Number(cache.get("LINE_PUSH_LAST_ATTEMPT_MS") || 0);
+  const waitMs = LINE_PUSH_MIN_INTERVAL_MS - (Date.now() - lastAttempt);
+  if (waitMs > 0) {
+    Utilities.sleep(waitMs);
+  }
+}
+
+function recordLinePushAttempt() {
+  CacheService.getScriptCache().put("LINE_PUSH_LAST_ATTEMPT_MS", String(Date.now()), 60);
+}
+
+function getLinePushResult(response, attempts) {
+  return {
+    lineStatus: response.getResponseCode(),
+    attempts: attempts,
+    lineBody: truncateLineBody(response.getContentText())
+  };
+}
+
+function getLineRetryDelay(response, fallbackMs) {
+  const headers = getResponseHeaders(response);
+  const retryAfter = Number(headers["Retry-After"] || headers["retry-after"] || 0);
+  if (retryAfter > 0) {
+    return Math.min(retryAfter * 1000, 30000);
+  }
+  return fallbackMs;
+}
+
+function getResponseHeaders(response) {
+  try {
+    return response.getAllHeaders ? response.getAllHeaders() : response.getHeaders();
+  } catch (error) {
+    return {};
+  }
+}
+
+function truncateLineBody(body) {
+  return String(body || "").replace(/\s+/g, " ").slice(0, 240);
 }
 
 function appendMessage(message) {

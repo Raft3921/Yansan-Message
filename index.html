@@ -583,12 +583,6 @@
         sendMessage();
       });
 
-      messageText.addEventListener("keydown", function (event) {
-        if (event.key === "Enter" && !event.shiftKey) {
-          event.preventDefault();
-          sendMessage();
-        }
-      });
       messageText.addEventListener("input", saveCurrentDraft);
 
       var hasInitialGroup = bootFromCache();
@@ -856,9 +850,7 @@
             }, function (data) {
               var rows = normalizeList(data, "messages");
               var found = rows.some(function (row) {
-                return getField(row, ["text", "body", "message"]) === originalBody
-                  && getField(row, ["groupId"]) === localMessage.groupId
-                  && isOwnMessage(row);
+                return isMatchingPostedMessage(row, localMessage, originalBody);
               });
               if (found) {
                 resolve();
@@ -878,6 +870,19 @@
             }, 12000);
           }, 2500);
         });
+      }
+
+      function isMatchingPostedMessage(row, localMessage, originalBody) {
+        var rowTime = getField(row, ["time", "timestamp", "datetime", "date"]);
+        var rowMillis = new Date(rowTime).getTime();
+        var localMillis = new Date(localMessage.time).getTime();
+        if (Number.isNaN(rowMillis) || Number.isNaN(localMillis) || rowMillis < localMillis - 3000) {
+          return false;
+        }
+
+        return getField(row, ["text", "body", "message"]) === originalBody
+          && getField(row, ["groupId"]) === localMessage.groupId
+          && isOwnMessage(row);
       }
 
       function sendImageMessage(caption, imageData) {

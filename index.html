@@ -67,7 +67,7 @@
       top: 0;
       z-index: 5;
       display: grid;
-      grid-template-columns: 1fr auto auto;
+      grid-template-columns: 1fr minmax(190px, 280px) auto auto;
       gap: 12px;
       align-items: center;
       min-height: 64px;
@@ -113,6 +113,64 @@
 
     .status.error {
       color: #ffe1d9;
+    }
+
+    .quota-meter {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+      color: #fff;
+    }
+
+    .quota-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 900;
+      line-height: 1.2;
+    }
+
+    .quota-label,
+    .quota-count {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .quota-track {
+      position: relative;
+      height: 9px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.32);
+    }
+
+    .quota-fill {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: #39d98a;
+      transition: width 180ms ease, background-color 180ms ease;
+    }
+
+    .quota-meter.warning .quota-fill {
+      background: #ffd166;
+    }
+
+    .quota-meter.danger .quota-fill {
+      background: #ff6b5f;
+    }
+
+    .quota-note {
+      overflow: hidden;
+      color: rgba(255, 255, 255, 0.86);
+      font-size: 10px;
+      font-weight: 800;
+      line-height: 1.1;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .notify-button {
@@ -481,6 +539,10 @@
         gap: 8px;
       }
 
+      .quota-meter {
+        grid-column: 1 / -1;
+      }
+
       .status {
         grid-column: 1 / -1;
         min-height: 16px;
@@ -495,6 +557,16 @@
       <div class="title-block">
         <h1>やんさんチャット</h1>
         <p class="current-group" id="currentGroupName">グループ読み込み中</p>
+      </div>
+      <div class="quota-meter" id="quotaMeter" aria-label="LINE月間送信枠">
+        <div class="quota-row">
+          <span class="quota-label">月間送信枠</span>
+          <span class="quota-count" id="quotaCount">確認中</span>
+        </div>
+        <div class="quota-track" aria-hidden="true">
+          <div class="quota-fill" id="quotaFill"></div>
+        </div>
+        <div class="quota-note" id="quotaNote">画像のみ1通 / 画像+本文2通</div>
       </div>
       <button class="notify-button" id="notifyButton" type="button">通知オン</button>
       <p class="status" id="listStatus" role="status" aria-live="polite">読み込み中</p>
@@ -559,6 +631,10 @@
       var deleteGroupButton = document.getElementById("deleteGroupButton");
       var notifyButton = document.getElementById("notifyButton");
       var currentGroupName = document.getElementById("currentGroupName");
+      var quotaMeter = document.getElementById("quotaMeter");
+      var quotaCount = document.getElementById("quotaCount");
+      var quotaFill = document.getElementById("quotaFill");
+      var quotaNote = document.getElementById("quotaNote");
       var listStatus = document.getElementById("listStatus");
       var messages = document.getElementById("messages");
       var chatLog = document.getElementById("chatLog");
@@ -578,6 +654,7 @@
       var serviceWorkerRegistration = null;
       var pendingTextSends = {};
       var statusHoldUntil = 0;
+      var lineQuotaExhausted = false;
 
       messageForm.addEventListener("submit", function (event) {
         event.preventDefault();
@@ -588,6 +665,7 @@
 
       var hasInitialGroup = bootFromCache();
       loadGroups();
+      loadLineQuota();
       if (hasInitialGroup) {
         loadMessages();
       }
@@ -597,6 +675,7 @@
         }
       }, REFRESH_MS);
       setInterval(loadGroups, 60000);
+      setInterval(loadLineQuota, 300000);
       updateAppBadge();
 
       groupSelect.addEventListener("change", function () {
@@ -639,6 +718,12 @@
         }
         if (!body && !selectedImage) {
           messageText.focus();
+          return;
+        }
+
+        if (lineQuotaExhausted) {
+          showStatus("送信不可：LINEの月間送信枠を使い切っています", "error", 30000);
+          loadLineQuota();
           return;
         }
 
@@ -685,10 +770,12 @@
           if (data && data.ok) {
             showStatus("送信しました", "", 12000);
             clearDraftIfUnchanged(payload.groupId, originalBody);
+            loadLineQuota();
             loadMessages();
             return;
           }
           showStatus(formatSendFailure(data), "error", 30000);
+          loadLineQuota();
           messageText.focus();
           loadMessages();
         }, function () {
@@ -696,6 +783,7 @@
           sendButton.disabled = false;
           sendButton.textContent = "送信";
           showStatus("送信失敗（30秒以内に確認できません。届いていなければ少し待って再送してください）", "error", 30000);
+          loadLineQuota();
           messageText.focus();
           loadMessages();
         }, 30000);
@@ -805,9 +893,11 @@
           })
         }).then(function () {
           showStatus("画像を送信しました", "");
+          loadLineQuota();
           window.setTimeout(loadMessages, 1800);
         }).catch(function () {
           showStatus("画像送信失敗", "error");
+          loadLineQuota();
           removePendingLocalMessage(localMessage);
           messageText.value = caption;
           loadMessages();
@@ -964,6 +1054,60 @@
         }, function () {
           showStatus("グループ読み込み失敗", "error");
         });
+      }
+
+      function loadLineQuota() {
+        loadJsonp({ action: "lineStatus" }, function (data) {
+          renderLineQuota(data);
+        }, function () {
+          renderLineQuota(null);
+        }, 12000);
+      }
+
+      function renderLineQuota(data) {
+        var quotaBody = data && data.quota && data.quota.body;
+        var consumptionBody = data && data.consumption && data.consumption.body;
+        var totalUsage = Number(consumptionBody && consumptionBody.totalUsage);
+
+        quotaMeter.className = "quota-meter";
+
+        if (!data || !data.ok || !quotaBody || !consumptionBody || !Number.isFinite(totalUsage)) {
+          quotaCount.textContent = "確認失敗";
+          quotaFill.style.width = "0%";
+          quotaNote.textContent = "画像のみ1通 / 画像+本文2通";
+          lineQuotaExhausted = false;
+          return;
+        }
+
+        if (quotaBody.type === "unlimited") {
+          quotaCount.textContent = totalUsage + "通 / 無制限";
+          quotaFill.style.width = "0%";
+          quotaNote.textContent = "今月の送信数。画像のみ1通 / 画像+本文2通";
+          lineQuotaExhausted = false;
+          return;
+        }
+
+        var quotaValue = Number(quotaBody.value);
+        if (!Number.isFinite(quotaValue) || quotaValue <= 0) {
+          quotaCount.textContent = totalUsage + "通";
+          quotaFill.style.width = "0%";
+          quotaNote.textContent = "画像のみ1通 / 画像+本文2通";
+          lineQuotaExhausted = false;
+          return;
+        }
+
+        var usedRatio = Math.max(0, Math.min(1, totalUsage / quotaValue));
+        var remaining = Math.max(0, quotaValue - totalUsage);
+        quotaFill.style.width = Math.round(usedRatio * 100) + "%";
+        quotaCount.textContent = totalUsage + "/" + quotaValue + "通";
+        quotaNote.textContent = "残り" + remaining + "通。画像のみ1通 / 画像+本文2通";
+        lineQuotaExhausted = totalUsage >= quotaValue;
+
+        if (lineQuotaExhausted || usedRatio >= 0.95) {
+          quotaMeter.classList.add("danger");
+        } else if (usedRatio >= 0.8) {
+          quotaMeter.classList.add("warning");
+        }
       }
 
       function loadJsonp(params, onSuccess, onError, timeoutMs) {
